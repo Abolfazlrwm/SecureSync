@@ -1,0 +1,42 @@
+# Example configuration — Peer B
+# Schema documented in docs/configuration.md
+# Used by docker-compose.yml's securesync-b service.
+
+device:
+  id: auto
+  name: "peer-b"
+
+sync:
+  folders:
+    - path: "/home/securesync/data"
+      ignore:
+        - "*.tmp"
+        - ".DS_Store"
+
+network:
+  discovery:
+    udp_broadcast: true
+    mdns: true
+    broadcast_port: 21027
+  transfer:
+    listen_port: 22000
+    max_parallel_transfers: 4
+    compression: true
+
+security:
+  cipher: "aes-256-gcm"
+  key_rotation:
+    max_bytes: 10_000_000_000
+    max_age_seconds: 3600
+  require_authorization: true
+
+reconnect:
+  backoff:
+    base_seconds: 1
+    multiplier: 2
+    max_seconds: 60
+  heartbeat_interval_seconds: 10
+
+logging:
+  level: "info"
+  format: "json"

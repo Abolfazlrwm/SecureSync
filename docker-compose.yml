@@ -1,0 +1,33 @@
+# Local two-peer development/demo setup.
+# See docs/deployment.md for the full explanation of this topology.
+
+services:
+  securesync-a:
+    build: .
+    container_name: securesync-a
+    hostname: securesync-a
+    volumes:
+      - ./examples/data/peer-a:/home/securesync/data
+      - ./examples/config/peer-a.yaml:/home/securesync/config.yaml:ro
+    ports:
+      - "22000:22000/tcp"
+      - "21027:21027/udp"
+    networks:
+      - securesync-net
+
+  securesync-b:
+    build: .
+    container_name: securesync-b
+    hostname: securesync-b
+    volumes:
+      - ./examples/data/peer-b:/home/securesync/data
+      - ./examples/config/peer-b.yaml:/home/securesync/config.yaml:ro
+    ports:
+      - "22001:22000/tcp"
+      - "21028:21027/udp"
+    networks:
+      - securesync-net
+
+networks:
+  securesync-net:
+    driver: bridge

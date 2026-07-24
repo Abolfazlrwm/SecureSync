@@ -1,0 +1,93 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "securesync"
+version = "0.1.0-dev"
+description = "Encrypted peer-to-peer file synchronization engine"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [
+    { name = "SecureSync Contributors" }
+]
+keywords = [
+    "file-sync",
+    "peer-to-peer",
+    "encryption",
+    "distributed-systems",
+    "end-to-end-encryption",
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Archiving :: Mirroring",
+    "Topic :: Security :: Cryptography",
+]
+
+# --- Runtime dependencies -----------------------------------------------
+# Each dependency is chosen deliberately; see docs/architecture.md
+# "Technology Decisions" for the rationale behind every entry.
+dependencies = [
+    "watchdog>=4.0",        # Cross-platform filesystem event monitoring
+    "cryptography>=42.0",   # X25519, AES-256-GCM, ChaCha20-Poly1305 (audited, industry standard)
+    "msgpack>=1.0",         # Compact binary payload encoding for the wire protocol
+    "orjson>=3.10",         # Fast JSON for config/CLI-facing data, not the wire protocol
+    "typer>=0.12",          # CLI framework (built on Click, type-hint driven)
+    "rich>=13.7",           # Terminal rendering for the live dashboard
+    "pyyaml>=6.0",          # YAML configuration files
+    "structlog>=24.1",      # Structured logging (introduced when logging lands)
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+    "mypy>=1.10",
+    "ruff>=0.5",
+    "black>=24.4",
+    "pre-commit>=3.7",
+]
+
+[project.scripts]
+# Target module doesn't exist yet — added in Phase 9 (CLI Dashboard).
+# `pip install -e .` succeeds now; running `securesync` will fail with
+# ModuleNotFoundError until Phase 9 lands, by design.
+securesync = "securesync.presentation.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/securesync"]
+
+# --- Tooling configuration ------------------------------------------------
+# Configuration only (no application logic) - safe to define in Phase 0
+# so every later phase is checked against the same bar from day one.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC"]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# --cov and --cov-report=term-missing apply to every `pytest` invocation.
+# Makefile/CI only ever *add* an extra --cov-report (html, xml) on top of
+# this — never repeat --cov=src/securesync or term-missing elsewhere.
+addopts = "--cov=src/securesync --cov-report=term-missing"

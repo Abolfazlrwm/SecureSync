@@ -1,0 +1,43 @@
+name: Feature request
+description: Propose a new capability or enhancement
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check [ROADMAP.md](../../ROADMAP.md) first — your idea may
+        already be planned for a specific phase.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the use case or limitation you're running into.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Which layer does this most affect?
+      options:
+        - Presentation (CLI/dashboard)
+        - Application (use cases)
+        - Domain
+        - Infrastructure (filesystem/network/db/crypto)
+        - Core (protocol/event bus/scheduler)
+        - Not sure
+    validations:
+      required: false

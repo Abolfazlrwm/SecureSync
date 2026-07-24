@@ -1,0 +1,9 @@
+# Each line is a file pattern followed by one or more owners.
+# These are placeholders — replace with real GitHub usernames/teams once
+# the project has maintainers beyond the initial author.
+
+*                           @<org>/maintainers
+
+/src/securesync/infrastructure/**/crypto*   @<org>/security-reviewers
+docs/security.md                            @<org>/security-reviewers
+docs/protocol.md                            @<org>/security-reviewers

@@ -1,0 +1,27 @@
+<svg viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="SecureSync logo">
+  <defs>
+    <linearGradient id="ss-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2563EB"/>
+      <stop offset="100%" stop-color="#0EA5E9"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Two arcs forming a sync loop -->
+  <path d="M 60 90
+           A 60 60 0 1 1 55 150"
+        fill="none" stroke="url(#ss-grad)" stroke-width="14"
+        stroke-linecap="round"/>
+  <polygon points="52,168 40,138 72,144" fill="url(#ss-grad)"/>
+
+  <path d="M 180 150
+           A 60 60 0 1 1 185 90"
+        fill="none" stroke="url(#ss-grad)" stroke-width="14"
+        stroke-linecap="round"/>
+  <polygon points="188,72 200,102 168,96" fill="url(#ss-grad)"/>
+
+  <!-- Padlock body, centered -->
+  <rect x="98" y="118" width="44" height="36" rx="6" fill="#0F172A"/>
+  <path d="M 106 118 V 104 a 14 14 0 0 1 28 0 v 14"
+        fill="none" stroke="#0F172A" stroke-width="8"/>
+  <circle cx="120" cy="134" r="5" fill="#0EA5E9"/>
+</svg>

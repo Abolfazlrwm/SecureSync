@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/<org>/securesync/security/advisories/new
+    about: Please report security vulnerabilities privately — do not open a public issue.
+  - name: Questions & discussion
+    url: https://github.com/<org>/securesync/discussions
+    about: For usage questions or open-ended discussion, use Discussions instead of an issue.

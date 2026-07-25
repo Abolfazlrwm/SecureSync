@@ -1,7 +1,10 @@
 # Architecture
 
-> Status: **Design** — Phase 0/0.5 established this document; it is updated
-> at the end of every subsequent phase to reflect what was actually built.
+> Status: **Design, Phase 1 implemented** — Phase 0/0.5 established this
+> document; it is updated at the end of every subsequent phase to reflect
+> what was actually built. Phase 1 (Filesystem Watcher) is the first
+> module with real code; everything else below is still the design for
+> phases not yet started.
 
 ## 1. Architectural Style
 
@@ -70,7 +73,7 @@ flowchart TD
 |---|---|---|
 | `presentation/` | CLI commands, live dashboard, output formatting | `application/` |
 | `application/` | Use-case orchestration (e.g. `SyncFolderUseCase`), DTOs | `domain/` |
-| `domain/` | Entities (`FileEntry`, `Chunk`, `Peer`), value objects, port interfaces (`ChunkHasher`, `TransferChannel`, `PeerRepository`) | nothing (pure Python) |
+| `domain/` | Entities (`FileEntry`, `Chunk`, `Peer`), value objects, port interfaces (`FileWatcher`, `ChunkHasher`, `TransferChannel`, `PeerRepository`) | nothing (pure Python) |
 | `infrastructure/` | Concrete adapters: `WatchdogFileWatcher`, `TCPTransferChannel`, `SQLitePeerRepository`, `X25519KeyExchange` | `domain/`, `shared/` |
 | `core/` | Cross-module engineering concerns: the binary wire protocol, an internal event bus, a job scheduler | `shared/` |
 | `shared/` | Exceptions, common types, `Result`/`Either`-style wrappers, constants | nothing |
@@ -99,22 +102,23 @@ flowchart TD
 
 | Pattern | Where | Why |
 |---|---|---|
-| Observer | Filesystem Watcher → Event Bus | Multiple consumers (chunker, DB indexer, logger) react to the same filesystem event without the watcher knowing about them |
+| Observer ✅ *(implemented, Phase 1)* | `FileWatcher` (subject) → `FileSystemEventObserver` implementations (subscribers) | Multiple consumers (chunker, DB indexer, logger) react to the same filesystem event without the watcher knowing about them. Wiring today is direct `subscribe`/`unsubscribe` on the watcher port; consumers may be re-wired through the `core/` event bus once it exists, without changing the port itself. |
 | Strategy | Encryption ciphers, compression algorithms | Swap AES-256-GCM ↔ ChaCha20-Poly1305, or compression on/off, behind one interface |
 | Repository | Metadata database access | Isolate SQLite-specific code from domain/application logic |
 | Factory | Peer connection creation | Centralize the construction of authenticated, encrypted peer sessions |
 | Command | CLI actions | Each CLI action is an isolated, testable object |
 | Chain of Responsibility | Protocol packet handling | Header validation → decryption → decompression → dispatch, each stage independent |
 
-*(Patterns are listed here as the plan; each is only actually introduced in
-the phase where its module is implemented — see `ROADMAP.md`.)*
+*(Patterns other than Observer are listed here as the plan; each is only
+actually introduced in the phase where its module is implemented — see
+`ROADMAP.md`.)*
 
 ## 5. Technology Decisions
 
 | Concern | Choice | Why (and what was rejected) |
 |---|---|---|
-| Async runtime | `asyncio` (stdlib) | No extra dependency; sufficient for socket + filesystem I/O concurrency; `trio` would add a second async ecosystem to support for no functional gain here |
-| Filesystem events | `watchdog` | Mature, cross-platform (inotify/FSEvents/ReadDirectoryChangesW), avoids hand-rolling OS-specific polling |
+| Async runtime | `asyncio` (stdlib) ✅ *(in use since Phase 1)* | No extra dependency; sufficient for socket + filesystem I/O concurrency; `trio` would add a second async ecosystem to support for no functional gain here |
+| Filesystem events | `watchdog` ✅ *(implemented, Phase 1)* | Mature, cross-platform (inotify/FSEvents/ReadDirectoryChangesW), avoids hand-rolling OS-specific polling |
 | Wire payload encoding | `msgpack` | Compact binary encoding, fast, language-agnostic (keeps the protocol implementable in other languages later) |
 | Config/CLI-facing data | `orjson` | Fast JSON where human-readable/debuggable data matters more than wire compactness |
 | Cryptography | `cryptography` (pyca) | Audited, maintained by a dedicated security-focused team, wraps OpenSSL/BoringSSL primitives — never hand-rolled crypto |
@@ -191,9 +195,9 @@ flowchart TB
 ```
 
 Arrows represent **allowed** import directions. `domain` has no outgoing
-arrow to any other package — this is enforced by code review (and, from
-Phase 1 onward, by an import-linter rule in CI) as the single most important
-architectural invariant in the codebase.
+arrow to any other package — this is enforced by code review today; an
+automated `import-linter` rule in CI to enforce it mechanically is still
+planned for a future phase, not yet added.
 
 ### 6.3 Component diagram — runtime components
 
@@ -220,6 +224,76 @@ flowchart LR
     CLI --> XFER
     CLI --> DISC
 ```
+
+### 6.4 Class diagram — Filesystem Watcher (Phase 1, implemented)
+
+```mermaid
+classDiagram
+    class FileSystemEvent {
+        <<value object>>
+        +FileSystemEventType event_type
+        +Path src_path
+        +bool is_directory
+        +datetime timestamp
+        +Path~optional~ dest_path
+        +bool is_rename
+        +tuple dedup_key
+    }
+    class FileSystemEventType {
+        <<enum>>
+        CREATED
+        MODIFIED
+        DELETED
+        MOVED
+    }
+    class FileWatcher {
+        <<abstract port>>
+        +start() None
+        +stop() None
+        +subscribe(observer) None
+        +unsubscribe(observer) None
+        +is_running bool
+    }
+    class FileSystemEventObserver {
+        <<protocol>>
+        +on_file_event(event) None
+    }
+    class WatchdogFileWatcher {
+        <<infrastructure adapter>>
+        -EventDebouncer debouncer
+        +start() None
+        +stop() None
+    }
+    class MonitorDirectoriesUseCase {
+        <<application use case>>
+        +register_observer(observer) None
+        +start() None
+        +stop() None
+    }
+    class LoggingFileSystemEventObserver {
+        <<reference observer>>
+        +on_file_event(event) None
+    }
+
+    FileWatcher <|.. WatchdogFileWatcher : implements
+    FileSystemEventObserver <|.. LoggingFileSystemEventObserver : implements
+    WatchdogFileWatcher ..> FileSystemEvent : creates (via translator)
+    WatchdogFileWatcher "1" o-- "*" FileSystemEventObserver : notifies
+    MonitorDirectoriesUseCase --> FileWatcher : depends on (injected)
+    FileSystemEvent --> FileSystemEventType
+```
+
+`FileWatcher` and `FileSystemEventObserver` live in `domain/watcher.py` and
+have zero knowledge of `watchdog`. `WatchdogFileWatcher`
+(`infrastructure/filesystem/watchdog_watcher.py`) is the only module in the
+codebase that imports `watchdog`; it translates raw `watchdog` events into
+`FileSystemEvent` value objects, debounces duplicates, and dispatches them
+asynchronously (via `asyncio.run_coroutine_threadsafe`, since `watchdog`
+runs its own OS thread) to every subscribed observer.
+`MonitorDirectoriesUseCase` (`application/use_cases/monitor_directories.py`)
+owns the watcher's lifecycle and is the composition point where a concrete
+`FileWatcher` is injected — application code never imports
+`WatchdogFileWatcher` directly.
 
 ## 7. Non-functional targets carried from Phase 0 onward
 

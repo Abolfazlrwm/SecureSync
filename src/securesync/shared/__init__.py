@@ -1,5 +1,8 @@
 """SecureSync — shared package.
 
-No implementation yet — scaffolding created in Phase 0. See
-docs/architecture.md for what belongs in this layer.
+Cross-cutting exceptions, common types, constants. Depends on nothing.
+See docs/architecture.md for what belongs in this layer.
+
+Implemented so far (Phase 1):
+    - ``exceptions``: ``SecureSyncError`` (base) and ``FileWatcherError``.
 """

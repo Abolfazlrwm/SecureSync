@@ -12,9 +12,11 @@ Status is updated at the end of every phase alongside `CHANGELOG.md`.
       performance/benchmark plan, development, deployment, configuration,
       troubleshooting), ADRs 0001–0005, all Mermaid diagram types, visual
       assets. No application code — see `CHANGELOG.md` for the full list.
-- [ ] **Phase 1 — Filesystem Watcher**
-      Monitor create/modify/delete/rename/move across multiple directories
+- [x] **Phase 1 — Filesystem Watcher**
+      Monitor create/modify/delete/rename/move across multiple directories,
+      recursively, with debouncing, async dispatch, and graceful shutdown
       (Observer pattern, `watchdog`-based adapter behind a domain port).
+      111 tests, 98% coverage — see `CHANGELOG.md` for the full list.
 - [ ] **Phase 2 — Chunk Engine**
       Configurable chunk size, rolling hash, SHA-256, chunk metadata
       (Merkle tree support reserved for a later phase).

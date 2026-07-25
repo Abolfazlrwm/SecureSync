@@ -86,6 +86,7 @@ disallow_untyped_defs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 asyncio_mode = "auto"
 # --cov and --cov-report=term-missing apply to every `pytest` invocation.
 # Makefile/CI only ever *add* an extra --cov-report (html, xml) on top of

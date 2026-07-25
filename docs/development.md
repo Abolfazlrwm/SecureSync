@@ -71,8 +71,26 @@ src/securesync/
 
 ## Debugging tips
 
-*(This section grows as real debugging workflows emerge — Phase 0 has no
-runtime behavior to debug yet.)*
+- The filesystem watcher (`infrastructure/filesystem/watchdog_watcher.py`)
+  logs structured events via `structlog`. Set `structlog`'s log level to
+  `DEBUG` to see every raw event, including ones suppressed by
+  debouncing (`event_debounced`) or unrecognized by the translator
+  (`unrecognized_watchdog_event`).
+- On Linux, `watchdog` uses `inotify`, which has a per-user watch limit
+  (`fs.inotify.max_user_watches`). Watching very large directory trees
+  recursively can hit this; the symptom is silently missing events, not
+  an exception. Check `cat /proc/sys/fs/inotify/max_user_watches` if
+  events seem to stop arriving for deeply nested paths.
+- `WatchdogFileWatcher` dispatches events from a background OS thread
+  into the asyncio event loop via `asyncio.run_coroutine_threadsafe`. If
+  you're debugging a hang or a missed event, check that the loop passed
+  implicitly via `asyncio.get_running_loop()` at `start()` time is the
+  same loop your test/application is actually running on.
+- A single filesystem operation often produces more than one raw
+  `watchdog` notification (e.g. a file write also touches the parent
+  directory's mtime). Don't assume "one write = one event" when writing
+  new tests — see `tests/filesystem/` for the predicate-based waiting
+  pattern (`CollectingObserver.wait_until`) used to avoid that trap.
 
 ## Working across phases
 

@@ -10,6 +10,7 @@ gets a new ADR that says so and links back, rather than editing history).
 | [0003](0003-cryptography-pyca-as-the-crypto-library.md) | `cryptography` (pyca) as the Sole Cryptographic Library | Accepted |
 | [0004](0004-binary-header-with-msgpack-payload.md) | Fixed Binary Header + MessagePack Payload | Accepted |
 | [0005](0005-sqlite-for-metadata-storage.md) | SQLite for Metadata Storage | Accepted |
+| [0006](0006-filesystem-watcher-port-and-watchdog-adapter.md) | Filesystem Watcher Port with a `watchdog` Adapter | Accepted |
 
 ## Template for new ADRs
 

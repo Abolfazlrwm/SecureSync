@@ -10,13 +10,13 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)]()
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-inspired-4baaaa.svg)](CODE_OF_CONDUCT.md)
-[![Status](https://img.shields.io/badge/status-Phase_0.5_%E2%80%94_scaffolding-orange)]()
+[![Status](https://img.shields.io/badge/status-Phase_1_%E2%80%94_filesystem_watcher-orange)]()
 
 </div>
 
-> ⚠️ **Project status:** Phase 0.5 (repository scaffolding + full design
-> documentation). No sync engine application code has been written yet —
-> see [ROADMAP.md](ROADMAP.md) for what's next.
+> ⚠️ **Project status:** Phase 1 (Filesystem Watcher) is implemented. The
+> sync engine is still early — see [ROADMAP.md](ROADMAP.md) for what's
+> next.
 
 ---
 
@@ -69,7 +69,7 @@ flowchart LR
 > Checked items are implemented; unchecked items are planned. Tracked in
 > detail in [ROADMAP.md](ROADMAP.md).
 
-- [ ] Real-time filesystem watching (create/modify/delete/rename/move)
+- [x] Real-time filesystem watching (create/modify/delete/rename/move)
 - [ ] Content-defined chunking with rolling hash + SHA-256
 - [ ] Delta synchronization (only changed chunks are transferred)
 - [ ] Peer discovery (UDP broadcast + mDNS)

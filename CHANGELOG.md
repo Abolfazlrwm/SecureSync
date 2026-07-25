@@ -5,6 +5,54 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Phase 1: Filesystem Watcher
+- First real application code in the repository. Implements filesystem
+  monitoring (create/modify/delete/move/rename), across multiple
+  directories, optionally recursive, with debouncing of duplicate
+  rapid-fire events, async dispatch, graceful shutdown, and a
+  thread-safe Observer pattern — behind a domain port so no other layer
+  depends on `watchdog` directly.
+- `domain/events.py`: `FileSystemEvent` (immutable value object) and
+  `FileSystemEventType` enum, including `is_rename` and `dedup_key`.
+- `domain/watcher.py`: the `FileWatcher` port (subject) and the
+  `FileSystemEventObserver` protocol (observer) — the Observer pattern
+  boundary. Pure Python; no `watchdog` import.
+- `domain/exceptions.py`: `WatcherError` and friends
+  (`WatcherAlreadyRunningError`, `InvalidWatchTargetError`).
+- `shared/exceptions.py`: `SecureSyncError` (base) and
+  `FileWatcherError`, the shared root for cross-layer infrastructure
+  failures.
+- `infrastructure/filesystem/watchdog_watcher.py`: `WatchdogFileWatcher`,
+  the `watchdog`-based `FileWatcher` adapter — the only module that
+  imports `watchdog`.
+- `infrastructure/filesystem/debounce.py`: thread-safe `EventDebouncer`
+  with bounded memory (stale entries are evicted opportunistically, so a
+  long-running watcher over a high-churn directory doesn't leak memory).
+- `infrastructure/filesystem/event_translator.py`: pure translation from
+  raw `watchdog` events to domain `FileSystemEvent` objects, plus
+  `is_ignorable_event_type` so routine, in-scope noise (file open/close
+  notifications) is logged at DEBUG rather than WARNING.
+- `application/use_cases/monitor_directories.py`:
+  `MonitorDirectoriesUseCase`, orchestrating the watcher's lifecycle and
+  observer registration; usable as an `async with` context manager for
+  guaranteed graceful shutdown.
+- `application/observers/logging_observer.py`:
+  `LoggingFileSystemEventObserver`, a minimal reference observer.
+- 111 tests across `tests/unit/`, `tests/filesystem/` (real temp-directory,
+  real OS-event tests), and `tests/integration/` (use case + real
+  adapter). 98% coverage on `src/securesync/` (100% on every Phase 1
+  module).
+- `docs/adr/0006-filesystem-watcher-port-and-watchdog-adapter.md`: the
+  decision record for the port/adapter split and the debounce/dispatch
+  design.
+- `docs/architecture.md` updated: `FileWatcher` added to the domain
+  layer's port list, the Observer pattern entry marked implemented, a
+  new Filesystem Watcher class diagram, and the `asyncio`/`watchdog`
+  technology rows marked implemented.
+- `docs/development.md`: real debugging tips for the watcher (inotify
+  watch limits, structured logging, thread/event-loop interaction)
+  replacing the Phase 0 placeholder.
+
 ### Fixed — Phase 0.5 audit (pre-Phase-1 design review)
 - **Mermaid syntax bugs**: 12 instances of literal `\n` (rendered as text,
   not a line break) in `docs/networking.md` and `docs/deployment.md`

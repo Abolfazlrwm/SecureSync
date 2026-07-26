@@ -4,8 +4,10 @@ This directory holds SecureSync's benchmark suite. See
 [`docs/performance.md`](../docs/performance.md) for the full methodology —
 what's measured, how, and why.
 
-**Status:** empty scaffold (Phase 0/0.5). Benchmark scripts are added starting
-Phase 2 (Chunk Engine), one per module, as that module lands.
+**Status:** populated, starting Phase 2 (Chunk Engine) — `bench_hashing.py`
+and `bench_chunking.py`. One `bench_<module>.py` is added per phase, as
+that module lands. See `CHANGELOG.md` ("Benchmark results", Phase 2 entry)
+for the latest committed results.
 
 ## Running (once populated)
 

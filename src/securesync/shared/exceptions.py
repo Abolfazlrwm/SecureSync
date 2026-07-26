@@ -16,3 +16,14 @@ class SecureSyncError(Exception):
 
 class FileWatcherError(SecureSyncError):
     """Raised when the filesystem-watcher infrastructure adapter fails."""
+
+
+class ChunkEngineError(SecureSyncError):
+    """Raised when a chunk-engine infrastructure adapter fails.
+
+    Covers technology-level failures with no domain meaning (a write
+    failing, a manifest file being corrupt on disk) — failures the
+    domain itself can reason about (an invalid chunk size, a missing
+    source file) raise a type from
+    ``securesync.domain.chunk_exceptions`` instead.
+    """

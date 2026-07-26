@@ -59,9 +59,13 @@ src/securesync/
   for `domain/entities.py` lives at `tests/unit/domain/test_entities.py`.
 - `tests/integration/` exercises multiple layers together (e.g. a use case
   with a real SQLite database in a temp directory).
-- `tests/network/`, `tests/filesystem/`, `tests/security/` are for tests
-  that specifically exercise those concerns end-to-end (real sockets, real
-  filesystem events, adversarial protocol inputs).
+- `tests/network/`, `tests/filesystem/`, `tests/chunking/`, `tests/security/`
+  are for tests that specifically exercise those concerns end-to-end (real
+  sockets, real filesystem events, real files at realistic scale,
+  adversarial protocol inputs).
+- `tests/property/` holds Hypothesis property-based tests — structural
+  invariants checked against many randomly generated inputs, rather than
+  the fixed set of examples in `tests/unit/`.
 - `tests/benchmark/` holds correctness tests *for* the benchmark harness
   itself (not the benchmarks — those live in `benchmarks/`).
 - Domain and application layer tests should never need a real socket, real
@@ -91,6 +95,26 @@ src/securesync/
   directory's mtime). Don't assume "one write = one event" when writing
   new tests — see `tests/filesystem/` for the predicate-based waiting
   pattern (`CollectingObserver.wait_until`) used to avoid that trap.
+- `StreamingChunkReader` (`infrastructure/chunking/streaming_chunk_reader.py`)
+  reads in bounded blocks regardless of chunk size — if you're debugging
+  unexpected memory growth while chunking a large file, confirm the
+  growth is actually coming from your own code holding onto `Chunk`
+  objects (e.g. accumulating a list of them) rather than the reader
+  itself; the reader only ever holds one chunk's worth of data at a time.
+  `tests/chunking/test_streaming_chunk_reader_filesystem.py`'s
+  `TestPeakMemoryStaysBounded` shows the `tracemalloc` pattern used to
+  verify this.
+- Chunk IDs are deterministic (derived from the source path and index via
+  `uuid.uuid5`, not random) — if a chunk ID looks wrong, check the
+  *inputs* to `_derive_chunk_id` first (has the path changed? the index?)
+  rather than assuming non-determinism.
+- The chunk engine's domain and infrastructure code is synchronous by
+  design (see ADR-0008); only the use cases in `application/use_cases/`
+  are `async`. If you're adding a new synchronous helper that an async
+  use case needs to call without blocking the event loop, reach for
+  `utils.async_iter.iter_in_thread` (for a blocking iterator) or
+  `asyncio.to_thread` directly (for a single blocking call) rather than
+  making the helper itself `async def` over a blocking implementation.
 
 ## Working across phases
 

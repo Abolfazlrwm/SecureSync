@@ -11,6 +11,8 @@ gets a new ADR that says so and links back, rather than editing history).
 | [0004](0004-binary-header-with-msgpack-payload.md) | Fixed Binary Header + MessagePack Payload | Accepted |
 | [0005](0005-sqlite-for-metadata-storage.md) | SQLite for Metadata Storage | Accepted |
 | [0006](0006-filesystem-watcher-port-and-watchdog-adapter.md) | Filesystem Watcher Port with a `watchdog` Adapter | Accepted |
+| [0007](0007-chunking-strategy-as-a-pluggable-port.md) | Chunking Strategy as a Pluggable Port (Strategy Pattern) | Accepted |
+| [0008](0008-synchronous-chunk-engine-core-with-async-boundary.md) | Synchronous Chunk-Engine Core with an Async Use-Case Boundary | Accepted |
 
 ## Template for new ADRs
 

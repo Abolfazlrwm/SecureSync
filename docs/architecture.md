@@ -1,9 +1,9 @@
 # Architecture
 
-> Status: **Design, Phase 1 implemented** — Phase 0/0.5 established this
+> Status: **Design, Phases 1–2 implemented** — Phase 0/0.5 established this
 > document; it is updated at the end of every subsequent phase to reflect
-> what was actually built. Phase 1 (Filesystem Watcher) is the first
-> module with real code; everything else below is still the design for
+> what was actually built. Phase 1 (Filesystem Watcher) and Phase 2 (Chunk
+> Engine) have real code; everything else below is still the design for
 > phases not yet started.
 
 ## 1. Architectural Style
@@ -72,13 +72,13 @@ flowchart TD
 | Layer | Responsibility | Depends on |
 |---|---|---|
 | `presentation/` | CLI commands, live dashboard, output formatting | `application/` |
-| `application/` | Use-case orchestration (e.g. `SyncFolderUseCase`), DTOs | `domain/` |
-| `domain/` | Entities (`FileEntry`, `Chunk`, `Peer`), value objects, port interfaces (`FileWatcher`, `ChunkHasher`, `TransferChannel`, `PeerRepository`) | nothing (pure Python) |
-| `infrastructure/` | Concrete adapters: `WatchdogFileWatcher`, `TCPTransferChannel`, `SQLitePeerRepository`, `X25519KeyExchange` | `domain/`, `shared/` |
+| `application/` | Use-case orchestration (e.g. `SyncFolderUseCase`, `ChunkFileUseCase` ✅), DTOs | `domain/` |
+| `domain/` | Entities (`FileEntry`, `Chunk` ✅, `Peer`), value objects, port interfaces (`FileWatcher` ✅, `ChunkReader`/`ChunkHasher`/`ChunkWriter`/`ChunkRepository`/`ChunkingStrategy` ✅, `TransferChannel`, `PeerRepository`) | nothing (pure Python) |
+| `infrastructure/` | Concrete adapters: `WatchdogFileWatcher` ✅, `StreamingChunkReader`/`SHA256HashProvider`/`ChunkFileWriter`/`FileChunkRepository` ✅, `TCPTransferChannel`, `SQLitePeerRepository`, `X25519KeyExchange` | `domain/`, `shared/` |
 | `core/` | Cross-module engineering concerns: the binary wire protocol, an internal event bus, a job scheduler | `shared/` |
 | `shared/` | Exceptions, common types, `Result`/`Either`-style wrappers, constants | nothing |
 | `config/` | YAML + environment variable loading, validation, hot reload | `shared/` |
-| `utils/` | Small, stateless, generic helpers (byte formatting, path helpers) | nothing |
+| `utils/` | Small, stateless, generic helpers (byte formatting, path helpers, the `iter_in_thread` async bridge ✅) | nothing |
 
 ## 3. SOLID Principles — how they show up here
 
@@ -103,13 +103,13 @@ flowchart TD
 | Pattern | Where | Why |
 |---|---|---|
 | Observer ✅ *(implemented, Phase 1)* | `FileWatcher` (subject) → `FileSystemEventObserver` implementations (subscribers) | Multiple consumers (chunker, DB indexer, logger) react to the same filesystem event without the watcher knowing about them. Wiring today is direct `subscribe`/`unsubscribe` on the watcher port; consumers may be re-wired through the `core/` event bus once it exists, without changing the port itself. |
-| Strategy | Encryption ciphers, compression algorithms | Swap AES-256-GCM ↔ ChaCha20-Poly1305, or compression on/off, behind one interface |
-| Repository | Metadata database access | Isolate SQLite-specific code from domain/application logic |
+| Strategy ✅ *(implemented, Phase 2, for chunking)* | `ChunkingStrategy` (port) → `FixedSizeChunkingStrategy` (only adapter so far) | Chunk-boundary decisions are pluggable: a future content-defined strategy (rolling hash / Rabin fingerprint / FastCDC) is a new adapter behind the same port — see ADR-0007. Encryption ciphers and compression algorithms are planned future uses of the same pattern, at their own ports, once those phases land. |
+| Repository 🟡 *(partially implemented, Phase 2 — temporary adapter)* | `ChunkRepository` (port) → `FileChunkRepository` (JSON-on-disk, temporary) now; a SQLite-backed adapter behind the same port lands in Phase 8 | Isolates manifest-storage technology from domain/application logic; the eventual metadata database swap-in requires no change to any caller |
 | Factory | Peer connection creation | Centralize the construction of authenticated, encrypted peer sessions |
 | Command | CLI actions | Each CLI action is an isolated, testable object |
 | Chain of Responsibility | Protocol packet handling | Header validation → decryption → decompression → dispatch, each stage independent |
 
-*(Patterns other than Observer are listed here as the plan; each is only
+*(Patterns not yet marked ✅/🟡 are listed here as the plan; each is only
 actually introduced in the phase where its module is implemented — see
 `ROADMAP.md`.)*
 
@@ -119,10 +119,11 @@ actually introduced in the phase where its module is implemented — see
 |---|---|---|
 | Async runtime | `asyncio` (stdlib) ✅ *(in use since Phase 1)* | No extra dependency; sufficient for socket + filesystem I/O concurrency; `trio` would add a second async ecosystem to support for no functional gain here |
 | Filesystem events | `watchdog` ✅ *(implemented, Phase 1)* | Mature, cross-platform (inotify/FSEvents/ReadDirectoryChangesW), avoids hand-rolling OS-specific polling |
+| Chunk hashing | `hashlib` (stdlib) ✅ *(implemented, Phase 2)* | SHA-256 only, via the standard library exclusively — no custom or third-party crypto for something this security-sensitive; `hashlib`'s C implementation is fast enough that a compiled alternative (e.g. a Rust binding) isn't justified for this phase |
 | Wire payload encoding | `msgpack` | Compact binary encoding, fast, language-agnostic (keeps the protocol implementable in other languages later) |
-| Config/CLI-facing data | `orjson` | Fast JSON where human-readable/debuggable data matters more than wire compactness |
+| Config/CLI-facing data | `orjson` ✅ *(implemented, Phase 2, for the chunk manifest)* | Fast JSON where human-readable/debuggable data matters more than wire compactness |
 | Cryptography | `cryptography` (pyca) | Audited, maintained by a dedicated security-focused team, wraps OpenSSL/BoringSSL primitives — never hand-rolled crypto |
-| Metadata storage | `sqlite3` (stdlib) | Zero-ops embedded database, transactional, sufficient for per-device metadata (peers, chunks, versions) |
+| Metadata storage | `sqlite3` (stdlib) | Zero-ops embedded database, transactional, sufficient for per-device metadata (peers, chunks, versions) — `FileChunkRepository` (Phase 2) is a temporary filesystem-backed stand-in behind the same port until this lands |
 | CLI framework | `Typer` | Type-hint-driven, minimal boilerplate, built on Click |
 | Terminal UI | `Rich` | Progress bars, live-updating tables for the dashboard |
 
@@ -295,9 +296,120 @@ owns the watcher's lifecycle and is the composition point where a concrete
 `FileWatcher` is injected — application code never imports
 `WatchdogFileWatcher` directly.
 
+### 6.5 Class diagram — Chunk Engine (Phase 2, implemented)
+
+```mermaid
+classDiagram
+    class Chunk {
+        <<value object>>
+        +ChunkMetadata metadata
+        +bytes data
+        +with_hash(hash) Chunk
+    }
+    class ChunkMetadata {
+        <<value object>>
+        +str chunk_id
+        +int index
+        +int size
+        +int offset
+        +ChunkHash~optional~ chunk_hash
+        +datetime created_at
+    }
+    class ChunkHash {
+        <<value object>>
+        +ChunkAlgorithm algorithm
+        +str digest
+    }
+    class ChunkCollection {
+        <<value object>>
+        +Path source_path
+        +int chunk_size
+        +int total_size
+        +tuple~ChunkMetadata~ chunks
+    }
+    class ChunkingStrategy {
+        <<abstract port>>
+        +next_cut(buffered, at_eof) int
+        +preferred_read_block_size int
+        +name str
+    }
+    class ChunkReader {
+        <<abstract port>>
+        +read_chunks(path, strategy) Iterator~Chunk~
+    }
+    class ChunkHasher {
+        <<abstract port>>
+        +hash(data) ChunkHash
+    }
+    class ChunkWriter {
+        <<abstract port>>
+        +write_chunk(destination, chunk) None
+    }
+    class ChunkRepository {
+        <<abstract port>>
+        +save(collection) None
+        +load(source_path) ChunkCollection
+    }
+    class FixedSizeChunkingStrategy {
+        <<infrastructure adapter>>
+        -int chunk_size
+    }
+    class StreamingChunkReader {
+        <<infrastructure adapter>>
+    }
+    class SHA256HashProvider {
+        <<infrastructure adapter>>
+    }
+    class ChunkFileWriter {
+        <<infrastructure adapter>>
+    }
+    class FileChunkRepository {
+        <<infrastructure adapter, temporary>>
+    }
+    class ChunkFileUseCase {
+        <<application use case>>
+        +execute(path, strategy) AsyncIterator~Chunk~
+    }
+    class VerifyChunkUseCase {
+        <<application use case>>
+        +execute(chunk) bool
+    }
+    class CalculateChunkHashesUseCase {
+        <<application use case>>
+        +execute(path, strategy) AsyncIterator~ChunkMetadata~
+        +build_manifest(path, strategy, chunk_size) ChunkCollection
+    }
+
+    ChunkingStrategy <|.. FixedSizeChunkingStrategy : implements
+    ChunkReader <|.. StreamingChunkReader : implements
+    ChunkHasher <|.. SHA256HashProvider : implements
+    ChunkWriter <|.. ChunkFileWriter : implements
+    ChunkRepository <|.. FileChunkRepository : implements
+    Chunk --> ChunkMetadata
+    ChunkMetadata --> ChunkHash
+    ChunkCollection --> ChunkMetadata
+    ChunkFileUseCase --> ChunkReader : depends on (injected)
+    ChunkFileUseCase --> ChunkHasher : depends on (injected)
+    VerifyChunkUseCase --> ChunkHasher : depends on (injected)
+    CalculateChunkHashesUseCase --> ChunkReader : depends on (injected)
+    CalculateChunkHashesUseCase --> ChunkHasher : depends on (injected)
+```
+
+Every port in `domain/chunking.py` has zero knowledge of `hashlib`,
+`readinto()`, or any I/O — `StreamingChunkReader` and `SHA256HashProvider`
+(`infrastructure/chunking/`) are the only modules that touch a real file or
+import `hashlib`. All three use cases (`application/use_cases/`) are
+`async def`, but the ports and adapters they depend on are plain
+synchronous generators — see ADR-0008 for why, and
+`utils/async_iter.iter_in_thread` for the bridge between the two. See
+ADR-0007 for why `ChunkingStrategy` is pull-based rather than size-based.
+
 ## 7. Non-functional targets carried from Phase 0 onward
 
-- Stream all file I/O — never load a full file into memory (files may exceed 100GB).
+- Stream all file I/O — never load a full file into memory (files may
+  exceed 100GB). ✅ *(verified, Phase 2: `StreamingChunkReader` reads in
+  bounded blocks regardless of file size; see the peak-memory tests in
+  `tests/chunking/` and the benchmark results in `CHANGELOG.md`.)*
 - All network-facing code is `async`.
 - Every cryptographic primitive is from `cryptography` (pyca); nothing is
   hand-rolled. See `docs/security.md` (added when the encryption phase lands).

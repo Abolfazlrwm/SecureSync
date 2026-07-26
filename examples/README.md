@@ -15,8 +15,11 @@ Then drop a file into `examples/data/peer-a/` and, once Phase 1–6 are
 implemented, watch it appear in `examples/data/peer-b/`.
 
 **Status:** the config files and compose topology are ready now (Phase
-0.5); they have nothing to actually sync yet since no implementation code
-exists before Phase 1.
+0.5). Phase 1 (Filesystem Watcher) and Phase 2 (Chunk Engine) are
+implemented, but neither is wired into a runnable CLI yet (that's Phase
+9), and nothing crosses the network without Phase 4 (Peer Discovery) and
+Phase 5 (Transfer Engine) — so dropping a file into `peer-a/` still has
+nothing to sync it to `peer-b/` yet.
 
 ## `data/peer-a/`, `data/peer-b/`
 

@@ -17,9 +17,14 @@ Status is updated at the end of every phase alongside `CHANGELOG.md`.
       recursively, with debouncing, async dispatch, and graceful shutdown
       (Observer pattern, `watchdog`-based adapter behind a domain port).
       111 tests, 98% coverage — see `CHANGELOG.md` for the full list.
-- [ ] **Phase 2 — Chunk Engine**
-      Configurable chunk size, rolling hash, SHA-256, chunk metadata
-      (Merkle tree support reserved for a later phase).
+- [x] **Phase 2 — Chunk Engine**
+      Streaming, bounded-memory chunking (`ChunkingStrategy` port, Strategy
+      pattern) with `FixedSizeChunkingStrategy` (default 4 MiB, configurable)
+      and a SHA-256 hash engine (`hashlib` only). Content-defined chunking
+      (rolling hash / Rabin fingerprint / FastCDC) is reserved behind the
+      same port, not implemented yet — see ADR-0007. Synchronous core with
+      an async use-case boundary via `asyncio.to_thread` — see ADR-0008.
+      258 tests, 98% coverage — see `CHANGELOG.md` for the full list.
 - [ ] **Phase 3 — Delta Synchronization**
       Hash comparison, chunk cache, transfer only changed chunks.
 - [ ] **Phase 4 — Peer Discovery**
@@ -55,4 +60,6 @@ support.
 ## Out of scope for now
 
 - Merkle tree chunk verification (reserved, see chunk engine notes)
+- Content-defined chunking — rolling hash / Rabin fingerprint / FastCDC
+  (reserved behind the `ChunkingStrategy` port, see ADR-0007)
 - Multi-language client implementations

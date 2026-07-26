@@ -5,14 +5,26 @@ fake adapter in ``tests/`` so application-layer code can be exercised
 without any real I/O. ``FakeFileWatcher`` is that fake for
 ``domain.watcher.FileWatcher``; ``CollectingObserver`` and
 ``FailingObserver`` are test doubles for
-``domain.watcher.FileSystemEventObserver``.
+``domain.watcher.FileSystemEventObserver``. ``FakeChunkReader``,
+``FakeChunkHasher``, ``FakeChunkWriter``, and ``FakeChunkRepository``
+are the equivalents for the ``domain.chunking`` ports.
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+import hashlib
+from collections.abc import Callable, Iterator
+from pathlib import Path
 
+from securesync.domain.chunk import Chunk, ChunkAlgorithm, ChunkCollection, ChunkHash
+from securesync.domain.chunking import (
+    ChunkHasher,
+    ChunkingStrategy,
+    ChunkReader,
+    ChunkRepository,
+    ChunkWriter,
+)
 from securesync.domain.events import FileSystemEvent
 from securesync.domain.watcher import FileSystemEventObserver, FileWatcher
 
@@ -164,3 +176,95 @@ class FailingObserver:
         """
         self.call_count += 1
         raise RuntimeError("simulated observer failure")
+
+
+class FakeChunkReader(ChunkReader):
+    """In-memory fake ``ChunkReader`` — yields a pre-configured chunk sequence.
+
+    Records every ``(path, strategy)`` pair it was called with, so a
+    test can assert the use case passed along the right arguments
+    without touching a real file.
+    """
+
+    def __init__(self, chunks: list[Chunk] | None = None) -> None:
+        """Initialize the fake.
+
+        Args:
+            chunks: The chunks ``read_chunks`` yields, in order. Empty
+                by default (simulates an empty file).
+        """
+        self._chunks = chunks or []
+        self.calls: list[tuple[Path, ChunkingStrategy]] = []
+        self.raise_on_read: Exception | None = None
+
+    def read_chunks(self, path: Path, strategy: ChunkingStrategy) -> Iterator[Chunk]:
+        """Record the call, then yield the configured chunks or raise."""
+        self.calls.append((path, strategy))
+        if self.raise_on_read is not None:
+            raise self.raise_on_read
+        yield from self._chunks
+
+
+class FakeChunkHasher(ChunkHasher):
+    """In-memory fake ``ChunkHasher`` — hashes via a configurable function.
+
+    Defaults to real SHA-256 (via
+    :class:`~securesync.infrastructure.chunking.sha256_hash_provider.SHA256HashProvider`-
+    compatible output) so fake-hashed chunks stay verifiable, but a
+    test can swap in ``hash_fn`` to force a specific digest.
+    """
+
+    def __init__(self, hash_fn: Callable[[bytes | memoryview], ChunkHash] | None = None) -> None:
+        """Initialize the fake.
+
+        Args:
+            hash_fn: Called with each chunk's data to produce its
+                ``ChunkHash``. Defaults to real SHA-256 hashing.
+        """
+        self._hash_fn = hash_fn or _default_hash
+        self.calls: list[bytes] = []
+
+    def hash(self, data: bytes | memoryview) -> ChunkHash:
+        """Record the call, then delegate to the configured hash function."""
+        self.calls.append(bytes(data))
+        return self._hash_fn(data)
+
+
+def _default_hash(data: bytes | memoryview) -> ChunkHash:
+    """Real SHA-256, used as ``FakeChunkHasher``'s default behavior."""
+    return ChunkHash(algorithm=ChunkAlgorithm.SHA256, digest=hashlib.sha256(data).hexdigest())
+
+
+class FakeChunkWriter(ChunkWriter):
+    """In-memory fake ``ChunkWriter`` — records writes instead of touching disk."""
+
+    def __init__(self) -> None:
+        """Initialize with no recorded writes."""
+        self.written: dict[Path, Chunk] = {}
+        self.raise_on_write: Exception | None = None
+
+    def write_chunk(self, destination: Path, chunk: Chunk) -> None:
+        """Record the write, unless configured to fail."""
+        if self.raise_on_write is not None:
+            raise self.raise_on_write
+        self.written[destination] = chunk
+
+
+class FakeChunkRepository(ChunkRepository):
+    """In-memory fake ``ChunkRepository`` — a dict keyed by source path."""
+
+    def __init__(self) -> None:
+        """Initialize with an empty store."""
+        self._store: dict[Path, ChunkCollection] = {}
+        self.save_calls = 0
+        self.load_calls = 0
+
+    def save(self, collection: ChunkCollection) -> None:
+        """Record the collection, keyed by its source path."""
+        self.save_calls += 1
+        self._store[collection.source_path] = collection
+
+    def load(self, source_path: Path) -> ChunkCollection | None:
+        """Return the previously saved collection, if any."""
+        self.load_calls += 1
+        return self._store.get(source_path)

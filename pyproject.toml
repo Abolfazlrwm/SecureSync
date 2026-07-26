@@ -48,6 +48,7 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-cov>=5.0",
+    "hypothesis>=6.100",     # Property-based tests for the chunk engine (Phase 2)
     "mypy>=1.10",
     "ruff>=0.5",
     "black>=24.4",

@@ -5,6 +5,45 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Phase 3: Delta Synchronization
+- `domain/delta.py`: `ChunkAction` (`TRANSFER`/`REUSE`), `ChunkDeltaEntry`,
+  `DeltaPlan` (immutable value objects) and `DeltaCalculator` — a
+  stateless domain service that diffs a freshly computed manifest
+  against a previously recorded baseline. Chunks are matched by
+  content hash across the *entire* baseline, not by index, so a
+  chunk that changed position but kept its bytes is still recognized
+  as reusable — see ADR-0009.
+- `domain/delta_exceptions.py`: `DeltaSyncError` and
+  `IncompatibleBaselineError`, `UnhashedChunkError`.
+- `application/use_cases/compute_delta.py`: `ComputeDeltaUseCase` —
+  loads the baseline manifest via the existing (Phase 2)
+  `ChunkRepository` port, builds the current manifest via
+  `CalculateChunkHashesUseCase`, and returns the computed
+  `DeltaPlan`. Deliberately read-only: it never persists the new
+  manifest as the baseline itself, since nothing has actually been
+  transferred yet at this phase — that's left to an explicit
+  `repository.save(plan.current)` call once a caller (the Phase 5
+  Transfer Engine) has confirmed the chunks in
+  `plan.chunks_to_transfer` actually reached a peer.
+- No new infrastructure or cache: `FileChunkRepository` from Phase 2
+  is reused unchanged as the chunk cache the roadmap calls for — see
+  ADR-0009 for why a second cache/port would have been pure
+  duplication.
+- 21 new tests across `tests/unit/domain/` (`DeltaCalculator`,
+  `DeltaPlan`'s derived properties, position-independent hash
+  matching, `IncompatibleBaselineError`/`UnhashedChunkError`),
+  `tests/unit/application/use_cases/` (`ComputeDeltaUseCase`
+  orchestration via `FakeChunkRepository`), and
+  `tests/integration/` (real `StreamingChunkReader` +
+  `SHA256HashProvider` + `FileChunkRepository`: first sync, an
+  untouched re-sync, an appended tail, and a single edited chunk, each
+  asserting exactly which chunks are flagged for transfer).
+- `docs/adr/0009-content-addressable-delta-computation.md`: why
+  delta computation reuses the Phase 2 `ChunkRepository` as the chunk
+  cache instead of introducing a new one, and why chunks are matched
+  by content hash rather than position.
+- `ROADMAP.md` updated to mark Phase 3 complete.
+
 ### Fixed — pre-Phase-3 repository audit
 - `domain/chunking.py` and `domain/chunk_exceptions.py` docstrings
   referenced a non-existent ADR filename

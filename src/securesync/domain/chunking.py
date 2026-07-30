@@ -4,7 +4,7 @@ This module defines the boundary between the domain and any concrete
 chunking, hashing, reading, writing, or persistence technology.
 Application code depends only on these abstractions; infrastructure
 adapters implement them. Nothing here performs I/O or imports a
-hashing library — see ``docs/adr/0007-chunk-engine-strategy-pattern-and-sync-core.md``
+hashing library — see ``docs/adr/0007-chunking-strategy-as-a-pluggable-port.md``
 for the reasoning behind this split.
 """
 

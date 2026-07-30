@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — pre-Phase-3 repository audit
+- `domain/chunking.py` and `domain/chunk_exceptions.py` docstrings
+  referenced a non-existent ADR filename
+  (`0007-chunk-engine-strategy-pattern-and-sync-core.md`) — the real
+  file is `0007-chunking-strategy-as-a-pluggable-port.md`. Both
+  docstrings now point to the correct filename; behavior is
+  unaffected (documentation-only).
+
 ### Added — Phase 2: Chunk Engine
 - Streaming, bounded-memory file chunking and a SHA-256 hashing engine.
   Designed to process files far larger than available RAM (targeting

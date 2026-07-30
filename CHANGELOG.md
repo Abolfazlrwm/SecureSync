@@ -5,6 +5,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Phase 6: End-to-End Encryption
+- `domain/crypto.py`: Defined `KeyExchangeProvider`, `SessionKeyProvider`, and `AeadCipher` ports.
+- `infrastructure/crypto/pyca_crypto.py`: Implemented `cryptography.io` adapters for X25519, HKDF, AES-256-GCM, and ChaCha20-Poly1305.
+- `docs/adr/0011-peer-discovery-with-mdns-and-in-memory-repo.md`: Combined ADR for networking and crypto decisions.
+- Full unit tests for key exchange, session key derivation, and both AEAD ciphers.
+
+### Added — Phase 5: Transfer Engine
+- `core/protocol.py`: Implemented the binary wire protocol with a 32-byte header and MessagePack payload.
+- `domain/transfer.py`: Defined `TransferTransport` and `TransferSession` ports.
+- `application/use_cases/transfer_chunks.py`: Created `UploadChunksUseCase` and `DownloadChunksUseCase` for orchestrating data transfer.
+- Unit tests for protocol serialization and transfer use cases.
+
+### Added — Phase 4: Peer Discovery
+- `domain/networking.py`: Introduced `Peer`, `PeerIdentity`, `PeerAddress`, and `PeerCapabilities` entities, plus `DiscoveryService` and `PeerRepository` ports.
+- `infrastructure/networking/mdns_discovery.py`: Implemented mDNS discovery using the `zeroconf` library.
+- `infrastructure/networking/in_memory_peer_repository.py`: Created a thread-safe in-memory peer cache.
+- `application/use_cases/discover_peers.py`: Orchestrates discovery and peer status tracking.
+- Unit tests for discovery, repository, and peer tracking.
+
 ### Documented — Phase 3.5: Persistent Manifest Repository (retroactive, no code change)
 - A task brief describing a "Phase 4 — Persistent Manifest
   Repository" (a new `JsonManifestRepository` adapter plus

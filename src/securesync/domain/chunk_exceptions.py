@@ -7,7 +7,7 @@ filesystem API, etc.) that ultimately raised them. Infrastructure
 adapters are responsible for translating low-level failures into these
 types where the failure has domain meaning; purely technological
 failures are wrapped in ``shared.exceptions.ChunkEngineError`` instead
-— see ``docs/adr/0007-chunk-engine-strategy-pattern-and-sync-core.md``.
+— see ``docs/adr/0007-chunking-strategy-as-a-pluggable-port.md``.
 """
 
 from __future__ import annotations

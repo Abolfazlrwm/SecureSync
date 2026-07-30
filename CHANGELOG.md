@@ -5,6 +5,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Documented — Phase 3.5: Persistent Manifest Repository (retroactive, no code change)
+- A task brief describing a "Phase 4 — Persistent Manifest
+  Repository" (a new `JsonManifestRepository` adapter plus
+  `SaveManifestUseCase`/`LoadManifestUseCase`/`DeleteManifestUseCase`/
+  `ManifestExistsUseCase`) was checked against `ROADMAP.md` and the
+  actual codebase before any code was written. Two findings: (1) the
+  project's real Phase 4 is **Peer Discovery**, not a manifest
+  repository — that work is already `ROADMAP.md`'s Phase 8, Metadata
+  Database; (2) the functionality the brief asked for already exists
+  — `ChunkRepository`/`FileChunkRepository` (Phase 2) already provide
+  one-JSON-document-per-file, atomic crash-safe writes, OS-safe hashed
+  filenames, and meaningful rejection of corrupted/incomplete
+  manifests, all confirmed against the existing test suite rather than
+  assumed.
+- No new component was built — doing so would have duplicated
+  `ChunkRepository`/`FileChunkRepository` under a new name, repeating
+  the exact duplication ADR-0009 already rejected once.
+- `docs/adr/0010-persistent-manifest-storage-is-chunk-repository.md`
+  records this decision, what was verified against the existing code
+  and tests, and the alternatives rejected.
+- `ROADMAP.md`: added a **Phase 3.5** entry between Phase 3 and Phase
+  4 recording that persistent manifest storage was already delivered
+  in Phase 2/3 — Phase 4 (Peer Discovery) and every later phase keep
+  their existing numbers.
+- `docs/architecture.md`: the Repository-pattern row now notes that
+  `ChunkRepository`/`FileChunkRepository` *is* the persistent manifest
+  repository, referencing ADR-0010.
+- No source file changed: `FileChunkRepository` was audited and found
+  to already satisfy every substantive requirement in the brief; it is
+  untouched by this entry.
+
 ### Added — Phase 3: Delta Synchronization
 - `domain/delta.py`: `ChunkAction` (`TRANSFER`/`REUSE`), `ChunkDeltaEntry`,
   `DeltaPlan` (immutable value objects) and `DeltaCalculator` — a

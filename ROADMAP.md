@@ -34,6 +34,22 @@ Status is updated at the end of every phase alongside `CHANGELOG.md`.
       baseline. No new cache, no transfer wiring — sending the
       resulting `chunks_to_transfer` over the network is Phase 5's
       job. 21 new tests — see `CHANGELOG.md` for the full list.
+- [x] **Phase 3.5 — Persistent Manifest Repository (retroactive)**
+      Formal documentation of a capability already delivered, not new
+      code: `ChunkRepository` (Phase 2 port) and its
+      `FileChunkRepository` adapter already are this project's
+      persistent manifest repository — one JSON document per file,
+      atomic crash-safe writes, OS-safe hashed filenames, meaningful
+      rejection of corrupted/incomplete manifests — reused unchanged
+      in Phase 3 as the delta-sync chunk cache. An external brief
+      proposed rebuilding this under a new name
+      (`JsonManifestRepository` + four new use cases); audited against
+      the actual code and existing tests and found to already satisfy
+      every substantive requirement, so no new component was added —
+      see ADR-0010. No code changed; this entry exists so the roadmap
+      accurately reflects when persistent manifest storage was
+      actually established (Phase 2) rather than leaving that
+      capability undocumented as its own milestone.
 - [ ] **Phase 4 — Peer Discovery**
       UDP broadcast, mDNS, peer cache, heartbeat, reconnect logic.
 - [ ] **Phase 5 — Transfer Engine**

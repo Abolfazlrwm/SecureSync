@@ -14,6 +14,7 @@ gets a new ADR that says so and links back, rather than editing history).
 | [0007](0007-chunking-strategy-as-a-pluggable-port.md) | Chunking Strategy as a Pluggable Port (Strategy Pattern) | Accepted |
 | [0008](0008-synchronous-chunk-engine-core-with-async-boundary.md) | Synchronous Chunk-Engine Core with an Async Use-Case Boundary | Accepted |
 | [0009](0009-content-addressable-delta-computation.md) | Content-Addressable Delta Computation, Reusing the Phase 2 Chunk Cache | Accepted |
+| [0010](0010-persistent-manifest-storage-is-chunk-repository.md) | Persistent Manifest Storage Is Already `ChunkRepository` / `FileChunkRepository` | Accepted |
 
 ## Template for new ADRs
 

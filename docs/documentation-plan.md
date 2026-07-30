@@ -15,7 +15,7 @@ which phase first introduces real content into it.
 | `docs/deployment.md` | Running SecureSync as a service, Docker usage | Phase 0.5 | Phase 5+ |
 | `docs/configuration.md` | YAML schema, environment variables, hot reload behavior | Phase 0.5 | Phase 10 |
 | `docs/troubleshooting.md` | Common issues and diagnostics | Phase 0.5 (structure only) | Ongoing, populated as issues surface |
-| `docs/adr/*` | Architecture Decision Records — one file per significant decision | 8 ADRs as of Phase 2 | One more per future notable decision |
+| `docs/adr/*` | Architecture Decision Records — one file per significant decision | 9 ADRs as of Phase 3 | One more per future notable decision |
 | `CHANGELOG.md` | Keep-a-Changelog format, one entry set per phase | Phase 0 onward | — |
 | `SECURITY.md` | Vulnerability reporting process + summary threat model | Phase 0.5 | Phase 6 (technical detail cross-check) |
 | `CONTRIBUTING.md` | How to propose changes, coding standards, commit conventions | Phase 0.5 | — |
@@ -39,3 +39,7 @@ throughout the codebase. ADRs `0007` and `0008`, added in Phase 2, record
 the chunk engine's `ChunkingStrategy` Strategy-pattern port (reserving
 content-defined chunking for later without a breaking change) and its
 synchronous core with an `async`-use-case boundary via `asyncio.to_thread`.
+ADR `0009`, added in Phase 3, records the decision to match chunks by
+content hash rather than position when computing a delta, and to reuse
+the Phase 2 `ChunkRepository` as the delta-sync chunk cache instead of
+introducing a new port.

@@ -1,0 +1,20 @@
+Cipher               | Throughput (MiB/s)  
+---------------------------------------------
+AES-256-GCM          |              1278.93
+ChaCha20-Poly1305    |              2488.95
+
+=== bench_hashing ===
+    size      median         p95      throughput      peak mem    avg peak mem   allocations
+--------------------------------------------------------------------------------------------
+     1KB       0.03ms       0.11ms        31.68MB/s       1.6 KiB         1.6 KiB             1
+     1MB       1.15ms       1.38ms       866.03MB/s       1.0 MiB         1.0 MiB             1
+
+Results written to /home/ubuntu/securesync/securesync/benchmarks/results/bench_hashing.json
+
+=== bench_chunking ===
+    size      median         p95      throughput      peak mem    avg peak mem   allocations
+--------------------------------------------------------------------------------------------
+     1KB       0.36ms       1.51ms         2.70MB/s       4.0 MiB         4.0 MiB             1
+     1MB       0.74ms       1.97ms      1344.74MB/s       7.0 MiB         7.0 MiB             1
+
+Results written to /home/ubuntu/securesync/securesync/benchmarks/results/bench_chunking.json

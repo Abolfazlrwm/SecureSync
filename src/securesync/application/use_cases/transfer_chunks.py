@@ -31,7 +31,7 @@ class DownloadChunksUseCase:
         """
         logger.info("download_started", peer_id=peer.device_id, chunk_count=len(chunk_hashes))
 
-        async for chunk in self._transport.request_chunks(peer, list(chunk_hashes)):  # type: ignore[attr-defined]
+        async for chunk in self._transport.request_chunks(peer, list(chunk_hashes)):
             yield chunk
 
         logger.info("download_finished", peer_id=peer.device_id)

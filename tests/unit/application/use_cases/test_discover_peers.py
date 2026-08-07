@@ -77,3 +77,28 @@ async def test_on_peer_lost_updates_status() -> None:
     saved_peer = peer_repo.save.call_args[0][0]
     assert saved_peer.device_id == "d1"
     assert saved_peer.status == PeerStatus.OFFLINE
+
+
+@pytest.mark.asyncio
+async def test_list_online_peers_filters_out_offline_peers() -> None:
+    """`list_online_peers` returns only peers with ONLINE status."""
+    discovery_service = MagicMock()
+    peer_repo = MagicMock()
+    online_peer = Peer(
+        PeerIdentity("d1", "h1", "f1"),
+        PeerAddress("1.2.3.4", 5678),
+        PeerCapabilities("0.1"),
+        status=PeerStatus.ONLINE,
+    )
+    offline_peer = Peer(
+        PeerIdentity("d2", "h2", "f2"),
+        PeerAddress("1.2.3.5", 5678),
+        PeerCapabilities("0.1"),
+        status=PeerStatus.OFFLINE,
+    )
+    peer_repo.list_all = AsyncMock(return_value=[online_peer, offline_peer])
+
+    use_case = DiscoverPeersUseCase(discovery_service, peer_repo)
+    result = await use_case.list_online_peers()
+
+    assert result == [online_peer]

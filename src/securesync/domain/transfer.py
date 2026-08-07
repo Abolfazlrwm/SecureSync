@@ -36,8 +36,16 @@ class TransferTransport(ABC):
 
     @abstractmethod
     async def request_chunks(self, peer: Peer, chunk_hashes: list[str]) -> AsyncIterator[Chunk]:
-        """Request multiple chunks from a peer."""
+        """Request multiple chunks from a peer.
+
+        Implementations must be real async generators (using ``yield``)
+        so that callers can iterate the result directly with
+        ``async for chunk in transport.request_chunks(...)`` — never a
+        coroutine that itself returns an iterator, which would need an
+        extra ``await`` before iteration.
+        """
         raise NotImplementedError
+        yield  # pragma: no cover — unreachable; makes this an async generator function
 
 
 class TransferSession(ABC):

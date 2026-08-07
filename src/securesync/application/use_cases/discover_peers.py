@@ -87,3 +87,12 @@ class DiscoverPeersUseCase(PeerDiscoveryObserver):
             )
             await self._peer_repository.save(offline_peer)
             logger.info("peer_lost", device_id=device_id)
+
+    async def list_online_peers(self) -> list[Peer]:
+        """List every currently known peer with :attr:`PeerStatus.ONLINE` status.
+
+        Returns:
+            All online peers currently in the repository.
+        """
+        peers = await self._peer_repository.list_all()
+        return [peer for peer in peers if peer.status == PeerStatus.ONLINE]

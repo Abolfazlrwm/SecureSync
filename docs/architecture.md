@@ -1,10 +1,10 @@
 # Architecture
 
-> Status: **Design, Phases 1–2 implemented** — Phase 0/0.5 established this
+> Status: **Design, Phases 1–3 implemented** — Phase 0/0.5 established this
 > document; it is updated at the end of every subsequent phase to reflect
-> what was actually built. Phase 1 (Filesystem Watcher) and Phase 2 (Chunk
-> Engine) have real code; everything else below is still the design for
-> phases not yet started.
+> what was actually built. Phase 1 (Filesystem Watcher), Phase 2 (Chunk
+> Engine), and Phase 3 (Delta Synchronization) have real code; everything
+> else below is still the design for phases not yet started.
 
 ## 1. Architectural Style
 
@@ -72,8 +72,8 @@ flowchart TD
 | Layer | Responsibility | Depends on |
 |---|---|---|
 | `presentation/` | CLI commands, live dashboard, output formatting | `application/` |
-| `application/` | Use-case orchestration (e.g. `SyncFolderUseCase`, `ChunkFileUseCase` ✅), DTOs | `domain/` |
-| `domain/` | Entities (`FileEntry`, `Chunk` ✅, `Peer`), value objects, port interfaces (`FileWatcher` ✅, `ChunkReader`/`ChunkHasher`/`ChunkWriter`/`ChunkRepository`/`ChunkingStrategy` ✅, `TransferChannel`, `PeerRepository`) | nothing (pure Python) |
+| `application/` | Use-case orchestration (e.g. `SyncFolderUseCase`, `ChunkFileUseCase` ✅, `ComputeDeltaUseCase` ✅), DTOs | `domain/` |
+| `domain/` | Entities (`FileEntry`, `Chunk` ✅, `Peer`), value objects, port interfaces (`FileWatcher` ✅, `ChunkReader`/`ChunkHasher`/`ChunkWriter`/`ChunkRepository`/`ChunkingStrategy` ✅, `TransferChannel`, `PeerRepository`); domain services (`DeltaCalculator` ✅) | nothing (pure Python) |
 | `infrastructure/` | Concrete adapters: `WatchdogFileWatcher` ✅, `StreamingChunkReader`/`SHA256HashProvider`/`ChunkFileWriter`/`FileChunkRepository` ✅, `TCPTransferChannel`, `SQLitePeerRepository`, `X25519KeyExchange` | `domain/`, `shared/` |
 | `core/` | Cross-module engineering concerns: the binary wire protocol, an internal event bus, a job scheduler | `shared/` |
 | `shared/` | Exceptions, common types, `Result`/`Either`-style wrappers, constants | nothing |
@@ -104,7 +104,8 @@ flowchart TD
 |---|---|---|
 | Observer ✅ *(implemented, Phase 1)* | `FileWatcher` (subject) → `FileSystemEventObserver` implementations (subscribers) | Multiple consumers (chunker, DB indexer, logger) react to the same filesystem event without the watcher knowing about them. Wiring today is direct `subscribe`/`unsubscribe` on the watcher port; consumers may be re-wired through the `core/` event bus once it exists, without changing the port itself. |
 | Strategy ✅ *(implemented, Phase 2, for chunking)* | `ChunkingStrategy` (port) → `FixedSizeChunkingStrategy` (only adapter so far) | Chunk-boundary decisions are pluggable: a future content-defined strategy (rolling hash / Rabin fingerprint / FastCDC) is a new adapter behind the same port — see ADR-0007. Encryption ciphers and compression algorithms are planned future uses of the same pattern, at their own ports, once those phases land. |
-| Repository 🟡 *(partially implemented, Phase 2 — temporary adapter)* | `ChunkRepository` (port) → `FileChunkRepository` (JSON-on-disk, temporary) now; a SQLite-backed adapter behind the same port lands in Phase 8 | Isolates manifest-storage technology from domain/application logic; the eventual metadata database swap-in requires no change to any caller |
+| Repository 🟡 *(partially implemented, Phase 2 — temporary adapter)* | `ChunkRepository` (port) → `FileChunkRepository` (JSON-on-disk, temporary) now; a SQLite-backed adapter behind the same port lands in Phase 8; reused unchanged in Phase 3 as the delta-sync chunk cache — see ADR-0009. This *is* the project's persistent manifest repository — one JSON document per file, atomic write, crash-safe, OS-safe hashed filenames — see ADR-0010 for why no second manifest-storage component was introduced alongside it | Isolates manifest-storage technology from domain/application logic; the eventual metadata database swap-in requires no change to any caller |
+| Domain Service ✅ *(implemented, Phase 3, for delta comparison)* | `DeltaCalculator` (`domain/delta.py`) | Content-hash comparison across two manifests doesn't belong to any single entity (it's not "a `Chunk`'s" behavior or "a `ChunkCollection`'s" behavior — it relates *two* of them), so it's modeled as a stateless domain service rather than forced onto an entity or pushed up into the application layer — see ADR-0009 |
 | Factory | Peer connection creation | Centralize the construction of authenticated, encrypted peer sessions |
 | Command | CLI actions | Each CLI action is an isolated, testable object |
 | Chain of Responsibility | Protocol packet handling | Header validation → decryption → decompression → dispatch, each stage independent |
@@ -403,6 +404,60 @@ import `hashlib`. All three use cases (`application/use_cases/`) are
 synchronous generators — see ADR-0008 for why, and
 `utils/async_iter.iter_in_thread` for the bridge between the two. See
 ADR-0007 for why `ChunkingStrategy` is pull-based rather than size-based.
+
+### 6.6 Class diagram — Delta Sync (Phase 3, implemented)
+
+```mermaid
+classDiagram
+    class ChunkAction {
+        <<enum>>
+        TRANSFER
+        REUSE
+    }
+    class ChunkDeltaEntry {
+        <<value object>>
+        +ChunkMetadata metadata
+        +ChunkAction action
+    }
+    class DeltaPlan {
+        <<value object>>
+        +Path source_path
+        +ChunkCollection~optional~ baseline
+        +ChunkCollection current
+        +tuple~ChunkDeltaEntry~ entries
+        +chunks_to_transfer tuple~ChunkMetadata~
+        +transfer_count int
+        +reuse_count int
+        +bytes_to_transfer int
+        +is_first_sync bool
+        +has_changes bool
+    }
+    class DeltaCalculator {
+        <<domain service>>
+        +compute(baseline, current) DeltaPlan
+    }
+    class ComputeDeltaUseCase {
+        <<application use case>>
+        +execute(path, strategy, chunk_size) DeltaPlan
+    }
+
+    DeltaPlan --> ChunkDeltaEntry
+    ChunkDeltaEntry --> ChunkAction
+    DeltaCalculator --> DeltaPlan : produces
+    DeltaCalculator --> ChunkCollection : compares two of
+    ComputeDeltaUseCase --> DeltaCalculator : depends on
+    ComputeDeltaUseCase --> ChunkRepository : depends on (injected, the chunk cache)
+    ComputeDeltaUseCase --> CalculateChunkHashesUseCase : depends on (injected)
+```
+
+`DeltaCalculator` takes no constructor arguments and holds no state — every
+call to `compute` is a pure function of its two arguments. It matches
+chunks by `ChunkHash` equality across the whole baseline (a `frozenset`
+membership test per current chunk), not by `ChunkMetadata.index`, so a
+chunk that changed position without changing content is still classified
+`REUSE` — see ADR-0009. No new port was introduced: `ComputeDeltaUseCase`
+depends on the same `ChunkRepository` port from Phase 2 as its chunk
+cache.
 
 ## 7. Non-functional targets carried from Phase 0 onward
 

@@ -26,9 +26,7 @@ def _metadata(index: int, *, size: int = 4, chunk_hash: ChunkHash | None) -> Chu
     )
 
 
-def _collection(
-    path: Path, chunks: list[ChunkMetadata], *, chunk_size: int = 4
-) -> ChunkCollection:
+def _collection(path: Path, chunks: list[ChunkMetadata], *, chunk_size: int = 4) -> ChunkCollection:
     return ChunkCollection(
         source_path=path,
         chunk_size=chunk_size,

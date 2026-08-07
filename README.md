@@ -10,12 +10,16 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)]()
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-inspired-4baaaa.svg)](CODE_OF_CONDUCT.md)
-[![Status](https://img.shields.io/badge/status-Phase_2_%E2%80%94_chunk_engine-orange)]()
+[![Status](https://img.shields.io/badge/status-Phase_3.5_%E2%80%94_manifest_repo_reconciled-orange)]()
 
 </div>
 
-> ⚠️ **Project status:** Phase 1 (Filesystem Watcher) and Phase 2 (Chunk
-> Engine) are implemented. The sync engine is still early — see
+> ⚠️ **Project status:** Phase 1 (Filesystem Watcher), Phase 2 (Chunk
+> Engine), and Phase 3 (Delta Synchronization) are implemented. Phase
+> 3.5 (see [ROADMAP.md](ROADMAP.md)) is a documentation-only
+> reconciliation — no new code — recording that persistent manifest
+> storage already exists (`ChunkRepository`/`FileChunkRepository`,
+> Phase 2). The sync engine is still early — see
 > [ROADMAP.md](ROADMAP.md) for what's next.
 
 ---
@@ -73,7 +77,15 @@ flowchart LR
 - [x] Streaming, bounded-memory chunking + SHA-256 hashing (content-defined
       chunking with rolling hash reserved for a later phase — see
       [ADR-0007](docs/adr/0007-chunking-strategy-as-a-pluggable-port.md))
-- [ ] Delta synchronization (only changed chunks are transferred)
+- [x] Delta synchronization: content-hash comparison against a recorded
+      baseline decides which chunks actually need to be sent
+      (`DeltaCalculator`, `ComputeDeltaUseCase` — see ADR-0009). Sending
+      those chunks over the network is a later phase.
+- [x] Persistent manifest storage: one JSON document per file, atomic
+      crash-safe writes, OS-safe hashed filenames
+      (`ChunkRepository`/`FileChunkRepository`, Phase 2 — see
+      [ADR-0010](docs/adr/0010-persistent-manifest-storage-is-chunk-repository.md)
+      for why no separate manifest-repository component exists)
 - [ ] Peer discovery (UDP broadcast + mDNS)
 - [ ] Resumable, streamed, compressed transfers over TLS
 - [ ] End-to-end encryption: X25519 key exchange, AES-256-GCM /

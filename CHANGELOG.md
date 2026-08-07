@@ -5,6 +5,84 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Documented — Phase 3.5: Persistent Manifest Repository (retroactive, no code change)
+- A task brief describing a "Phase 4 — Persistent Manifest
+  Repository" (a new `JsonManifestRepository` adapter plus
+  `SaveManifestUseCase`/`LoadManifestUseCase`/`DeleteManifestUseCase`/
+  `ManifestExistsUseCase`) was checked against `ROADMAP.md` and the
+  actual codebase before any code was written. Two findings: (1) the
+  project's real Phase 4 is **Peer Discovery**, not a manifest
+  repository — that work is already `ROADMAP.md`'s Phase 8, Metadata
+  Database; (2) the functionality the brief asked for already exists
+  — `ChunkRepository`/`FileChunkRepository` (Phase 2) already provide
+  one-JSON-document-per-file, atomic crash-safe writes, OS-safe hashed
+  filenames, and meaningful rejection of corrupted/incomplete
+  manifests, all confirmed against the existing test suite rather than
+  assumed.
+- No new component was built — doing so would have duplicated
+  `ChunkRepository`/`FileChunkRepository` under a new name, repeating
+  the exact duplication ADR-0009 already rejected once.
+- `docs/adr/0010-persistent-manifest-storage-is-chunk-repository.md`
+  records this decision, what was verified against the existing code
+  and tests, and the alternatives rejected.
+- `ROADMAP.md`: added a **Phase 3.5** entry between Phase 3 and Phase
+  4 recording that persistent manifest storage was already delivered
+  in Phase 2/3 — Phase 4 (Peer Discovery) and every later phase keep
+  their existing numbers.
+- `docs/architecture.md`: the Repository-pattern row now notes that
+  `ChunkRepository`/`FileChunkRepository` *is* the persistent manifest
+  repository, referencing ADR-0010.
+- No source file changed: `FileChunkRepository` was audited and found
+  to already satisfy every substantive requirement in the brief; it is
+  untouched by this entry.
+
+### Added — Phase 3: Delta Synchronization
+- `domain/delta.py`: `ChunkAction` (`TRANSFER`/`REUSE`), `ChunkDeltaEntry`,
+  `DeltaPlan` (immutable value objects) and `DeltaCalculator` — a
+  stateless domain service that diffs a freshly computed manifest
+  against a previously recorded baseline. Chunks are matched by
+  content hash across the *entire* baseline, not by index, so a
+  chunk that changed position but kept its bytes is still recognized
+  as reusable — see ADR-0009.
+- `domain/delta_exceptions.py`: `DeltaSyncError` and
+  `IncompatibleBaselineError`, `UnhashedChunkError`.
+- `application/use_cases/compute_delta.py`: `ComputeDeltaUseCase` —
+  loads the baseline manifest via the existing (Phase 2)
+  `ChunkRepository` port, builds the current manifest via
+  `CalculateChunkHashesUseCase`, and returns the computed
+  `DeltaPlan`. Deliberately read-only: it never persists the new
+  manifest as the baseline itself, since nothing has actually been
+  transferred yet at this phase — that's left to an explicit
+  `repository.save(plan.current)` call once a caller (the Phase 5
+  Transfer Engine) has confirmed the chunks in
+  `plan.chunks_to_transfer` actually reached a peer.
+- No new infrastructure or cache: `FileChunkRepository` from Phase 2
+  is reused unchanged as the chunk cache the roadmap calls for — see
+  ADR-0009 for why a second cache/port would have been pure
+  duplication.
+- 21 new tests across `tests/unit/domain/` (`DeltaCalculator`,
+  `DeltaPlan`'s derived properties, position-independent hash
+  matching, `IncompatibleBaselineError`/`UnhashedChunkError`),
+  `tests/unit/application/use_cases/` (`ComputeDeltaUseCase`
+  orchestration via `FakeChunkRepository`), and
+  `tests/integration/` (real `StreamingChunkReader` +
+  `SHA256HashProvider` + `FileChunkRepository`: first sync, an
+  untouched re-sync, an appended tail, and a single edited chunk, each
+  asserting exactly which chunks are flagged for transfer).
+- `docs/adr/0009-content-addressable-delta-computation.md`: why
+  delta computation reuses the Phase 2 `ChunkRepository` as the chunk
+  cache instead of introducing a new one, and why chunks are matched
+  by content hash rather than position.
+- `ROADMAP.md` updated to mark Phase 3 complete.
+
+### Fixed — pre-Phase-3 repository audit
+- `domain/chunking.py` and `domain/chunk_exceptions.py` docstrings
+  referenced a non-existent ADR filename
+  (`0007-chunk-engine-strategy-pattern-and-sync-core.md`) — the real
+  file is `0007-chunking-strategy-as-a-pluggable-port.md`. Both
+  docstrings now point to the correct filename; behavior is
+  unaffected (documentation-only).
+
 ### Added — Phase 2: Chunk Engine
 - Streaming, bounded-memory file chunking and a SHA-256 hashing engine.
   Designed to process files far larger than available RAM (targeting

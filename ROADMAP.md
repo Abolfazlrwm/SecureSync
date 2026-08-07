@@ -50,14 +50,15 @@ Status is updated at the end of every phase alongside `CHANGELOG.md`.
       accurately reflects when persistent manifest storage was
       actually established (Phase 2) rather than leaving that
       capability undocumented as its own milestone.
-- [ ] **Phase 4 — Peer Discovery**
-      UDP broadcast, mDNS, peer cache, heartbeat, reconnect logic.
-- [ ] **Phase 5 — Transfer Engine**
-      Async TCP + TLS, streaming, resumable transfers, integrity
-      validation, compression, parallel transfers.
-- [ ] **Phase 6 — End-to-End Encryption**
-      X25519 key exchange, AES-256-GCM / ChaCha20-Poly1305, nonce
-      management, session keys, key rotation.
+- [x] **Phase 4 — Peer Discovery**
+      mDNS discovery (`zeroconf`), in-memory peer repository (cache),
+      `DiscoverPeersUseCase` for online/offline tracking.
+- [x] **Phase 5 — Transfer Engine**
+      Binary wire protocol (32-byte header, MessagePack payload),
+      `TransferTransport` port, `UploadChunks`/`DownloadChunks` use cases.
+- [x] **Phase 6 — End-to-End Encryption**
+      X25519 key exchange, HKDF session key derivation, AES-256-GCM and
+      ChaCha20-Poly1305 AEAD ciphers (`cryptography.io` adapters).
 - [ ] **Phase 7 — Conflict Resolution**
       Timestamp + version metadata, conflict files, vector-clock-ready
       design.

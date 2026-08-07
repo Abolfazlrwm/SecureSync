@@ -15,7 +15,7 @@ which phase first introduces real content into it.
 | `docs/deployment.md` | Running SecureSync as a service, Docker usage | Phase 0.5 | Phase 5+ |
 | `docs/configuration.md` | YAML schema, environment variables, hot reload behavior | Phase 0.5 | Phase 10 |
 | `docs/troubleshooting.md` | Common issues and diagnostics | Phase 0.5 (structure only) | Ongoing, populated as issues surface |
-| `docs/adr/*` | Architecture Decision Records — one file per significant decision | 10 ADRs as of Phase 3.5 | One more per future notable decision |
+| `docs/adr/*` | Architecture Decision Records — one file per significant decision | 16 ADRs as of Phase 10.5 | One more per future notable decision |
 | `CHANGELOG.md` | Keep-a-Changelog format, one entry set per phase | Phase 0 onward | — |
 | `SECURITY.md` | Vulnerability reporting process + summary threat model | Phase 0.5 | Phase 6 (technical detail cross-check) |
 | `CONTRIBUTING.md` | How to propose changes, coding standards, commit conventions | Phase 0.5 | — |

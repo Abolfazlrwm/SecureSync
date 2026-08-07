@@ -7,7 +7,9 @@ peer-to-peer communication.
 from __future__ import annotations
 
 import struct
-from dataclasses import dataclass
+import time
+import zlib
+from dataclasses import dataclass, replace
 from enum import IntEnum, unique
 from typing import Any, Final
 
@@ -32,6 +34,18 @@ class PacketType(IntEnum):
     PEER_LIST = 0x21
     ERROR = 0xF0
     CLOSE = 0xFF
+
+
+class ProtocolError(Exception):
+    """Base class for all wire-protocol errors."""
+
+
+class InvalidHeaderError(ProtocolError):
+    """Raised when a header is the wrong size or has a bad magic number."""
+
+
+class PayloadIntegrityError(ProtocolError):
+    """Raised when a decoded payload's CRC32 doesn't match its header."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,14 +86,19 @@ class PacketHeader:
 
     @classmethod
     def unpack(cls, data: bytes) -> PacketHeader:
-        """Deserialize a 32-byte header."""
+        """Deserialize a 32-byte header.
+
+        Raises:
+            InvalidHeaderError: If ``data`` isn't 32 bytes, or its
+                magic number doesn't match :data:`MAGIC`.
+        """
         if len(data) != HEADER_SIZE:
-            raise ValueError(f"Invalid header size: {len(data)}")
+            raise InvalidHeaderError(f"Invalid header size: {len(data)}")
 
         magic, version, p_type, flags, msg_id, p_len, ts, crc = struct.unpack(">IBBHQIQI", data)
 
         if magic != MAGIC:
-            raise ValueError(f"Invalid magic number: {hex(magic)}")
+            raise InvalidHeaderError(f"Invalid magic number: {hex(magic)}")
 
         return cls(
             version=version,
@@ -100,8 +119,75 @@ class Packet:
     payload: dict[str, Any]
 
     def encode(self) -> bytes:
-        """Encode the packet to binary."""
+        """Encode the packet to binary.
+
+        ``header.payload_length`` and ``header.crc32`` are recomputed
+        from the actual serialized payload before encoding — a header
+        built with stale or placeholder values (e.g. ``payload_length=0``)
+        is corrected automatically, so callers never need to compute
+        either field themselves.
+
+        Returns:
+            The encoded header (32 bytes) followed by the msgpack-encoded payload.
+        """
         payload_bytes: bytes = msgpack.packb(self.payload)
-        # Update header with actual payload length and CRC
-        # In a real implementation, CRC would be calculated here
-        return self.header.pack() + payload_bytes
+        header = replace(
+            self.header,
+            payload_length=len(payload_bytes),
+            crc32=zlib.crc32(payload_bytes),
+        )
+        return header.pack() + payload_bytes
+
+    @classmethod
+    def decode(cls, data: bytes) -> Packet:
+        """Decode a complete packet (header + payload) from binary.
+
+        Args:
+            data: The full packet bytes, as produced by :meth:`encode`.
+
+        Returns:
+            The decoded :class:`Packet`.
+
+        Raises:
+            InvalidHeaderError: If the header is malformed.
+            PayloadIntegrityError: If the payload's CRC32 doesn't
+                match the header, or its length doesn't match
+                ``header.payload_length``.
+        """
+        header = PacketHeader.unpack(data[:HEADER_SIZE])
+        payload_bytes = data[HEADER_SIZE : HEADER_SIZE + header.payload_length]
+
+        if len(payload_bytes) != header.payload_length:
+            raise PayloadIntegrityError(
+                f"expected {header.payload_length} payload bytes, got {len(payload_bytes)}"
+            )
+        if zlib.crc32(payload_bytes) != header.crc32:
+            raise PayloadIntegrityError("payload CRC32 does not match header")
+
+        payload: dict[str, Any] = msgpack.unpackb(payload_bytes, raw=False)
+        return cls(header=header, payload=payload)
+
+
+def make_header(packet_type: PacketType, message_id: int, *, flags: int = 0) -> PacketHeader:
+    """Build a header with a real timestamp and placeholder length/CRC.
+
+    ``payload_length`` and ``crc32`` are filled in by :meth:`Packet.encode`
+    from the actual payload, so callers pass ``0`` for both here.
+
+    Args:
+        packet_type: The type of packet this header describes.
+        message_id: Unique ID for request/response correlation.
+        flags: Optional bitfield (compression, encryption, etc.).
+
+    Returns:
+        A :class:`PacketHeader` ready to pair with a payload in a :class:`Packet`.
+    """
+    return PacketHeader(
+        version=CURRENT_VERSION,
+        packet_type=packet_type,
+        flags=flags,
+        message_id=message_id,
+        payload_length=0,
+        timestamp=int(time.time() * 1000),
+        crc32=0,
+    )

@@ -5,6 +5,123 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — Phase 10.5: Real Integration (post-hoc audit)
+- `core/protocol.py`: `Packet.encode()` never actually computed a
+  CRC32 (comment: *"In a real implementation, CRC would be calculated
+  here"*) — it now computes a real CRC32 and the correct
+  `payload_length` from the actual serialized payload. Added
+  `Packet.decode()` (didn't exist before), which raises the new
+  `PayloadIntegrityError` on a CRC mismatch or truncated payload, and
+  `InvalidHeaderError` (replacing generic `ValueError`) for a
+  malformed header. Verified: encode→decode round-trips correctly; a
+  single flipped payload byte is correctly rejected.
+- `domain/transfer.py`: `TransferTransport.request_chunks` was
+  declared as a plain coroutine (no `yield`) but called directly with
+  `async for` in `transfer_chunks.py`, masked by
+  `# type: ignore[attr-defined]`. The abstract method now includes an
+  unreachable `yield` after `raise NotImplementedError`, making it a
+  real async generator function per Python's rules; the
+  `# type: ignore` was removed. Verified: `inspect.isasyncgen()` on a
+  concrete implementation now returns `True`.
+- `infrastructure/networking/in_process_transport.py` (new):
+  `InProcessNetwork` + `InProcessTransferTransport` — a real,
+  encrypted, tested `TransferTransport` implementation. `send_chunk`
+  frames a chunk through `core/protocol.py` (real CRC-checked
+  msgpack), encrypts with an injected `AeadCipher` + key, and delivers
+  it to the recipient's inbox; `request_chunks` decrypts and
+  reconstructs matching chunks from its own inbox. Verified against
+  the real, unmodified `UploadChunksUseCase`/`DownloadChunksUseCase`:
+  multiple chunks transferred correctly end to end; a wrong key
+  correctly raises `cryptography.exceptions.InvalidTag` rather than
+  silently succeeding. This is what actually connects the Phase 6
+  crypto layer to chunk transfer — previously, nothing did.
+- `application/orchestration.py`: `SyncOrchestrator`'s constructor
+  never called any of its four injected use cases outside `__init__`;
+  the sync loop only slept (comment: *"In a real implementation, this
+  would react to events"*). `start()`/`stop()` now call
+  `discovery_use_case.start()`/`.stop()` for real. The loop polls the
+  new `DiscoverPeersUseCase.list_online_peers()` every 5 seconds and
+  reacts via `handle_peer_discovered`, which now reads
+  `MetadataRepository.list_all_files()` for real to refresh
+  `stats.files_processed`. `download_use_case`/`upload_use_case`
+  became optional (`| None`): actually calling them per peer needs a
+  remote-manifest exchange this codebase doesn't have yet — see
+  ADR-0016 for why that gap is disclosed rather than papered over
+  with fabricated data. Also fixed: `stop()` could block for up to 5
+  seconds waiting out an in-progress poll interval; it now returns as
+  soon as requested (`asyncio.wait_for` on the stop event instead of a
+  plain `asyncio.sleep`). Verified: 7 tests, including one asserting
+  `stop()` completes in under 1 second.
+- `main.py`: removed the hand-rolled `MagicMock` class and all four
+  `# type: ignore[arg-type]` comments (comment: *"Mocks for
+  demonstration in this phase"*). Now wires real adapters —
+  `MdnsDiscoveryService` + `InMemoryPeerRepository` for discovery,
+  `InMemoryConflictRepository` for conflict detection — everywhere a
+  real one exists. `download_use_case`/`upload_use_case` are left
+  unset with an explanatory comment (no socket-based transport exists
+  yet; `InProcessTransferTransport` only connects peers in one
+  process). Also fixed: `main.py` read `orchestrator._stop_event`
+  directly (a private attribute); it now calls the new public
+  `SyncOrchestrator.wait_until_stopped()`.
+- `application/use_cases/discover_peers.py`: added
+  `list_online_peers()`, needed by the orchestrator's polling loop
+  above.
+- `docs/adr/0016-in-process-encrypted-transport.md`: full account of
+  every gap found, every fix made, and the one gap still honestly
+  open (no real socket transport, so no cross-machine transfer yet).
+- `ROADMAP.md`: added a **Phase 10.5** entry recording this audit,
+  without renumbering any later phase.
+- 12 new/updated tests: `test_protocol.py` (CRC round-trip, tamper
+  and truncation rejection, domain-specific exceptions),
+  `test_in_process_transport.py` (new — encrypted send/receive,
+  wrong-key rejection, real use-case round-trip),
+  `test_orchestration.py` (rewritten — real discovery start/stop,
+  real metadata reads, prompt `stop()`), `test_discover_peers.py`
+  (added `list_online_peers` coverage).
+
+### Fixed — Phase 4-10 code-quality audit
+- `infrastructure/crypto/pyca_crypto.py`: added Google-style
+  docstrings to all 7 previously-undocumented public methods across
+  `PycaKeyExchangeProvider`, `PycaSessionKeyProvider`, `AesGcmCipher`,
+  and `ChaCha20Cipher` — including a documented warning on
+  `derive_session_keys` about the send/receive key-swap ambiguity a
+  future caller must resolve.
+- `application/orchestration.py`: added docstrings to the `state` and
+  `stats` properties.
+- `domain/conflict_exceptions.py` (new): `ConflictError`,
+  `ConflictNotFoundError`. `application/use_cases/conflict_resolution.py`
+  now raises `ConflictNotFoundError` instead of a generic `ValueError`
+  for an unknown `conflict_id`, matching the domain-specific-exception
+  pattern used everywhere else in this codebase. Added a regression
+  test.
+
+### Added — Phase 10: Production Runtime
+- `domain/config.py`: Defined `Configuration`, `StorageConfig`, `NetworkConfig`, and `RuntimeProfile` entities.
+- `infrastructure/config/yaml_config_loader.py`: Implemented YAML configuration loading with `PyYAML`.
+- `main.py`: Created the application bootstrap process, dependency injection wiring, and signal handling for graceful shutdown.
+- `docs/adr/0015-production-runtime-and-configuration.md`: Documented the runtime and configuration architecture.
+- Unit tests for configuration loading and validation.
+
+### Added — Phase 9: Synchronization Orchestrator
+- `application/orchestration.py`: Implemented `SyncOrchestrator` to coordinate discovery, transfer, metadata, and conflict resolution.
+- `SyncState` machine and `SyncStats` for monitoring synchronization health and progress.
+- `docs/adr/0014-synchronization-orchestrator-state-machine.md`: Documented the orchestration and state management design.
+- Unit tests for the orchestrator lifecycle and event handling.
+
+### Added — Phase 8: Metadata Database
+- `domain/metadata.py`: Defined the `MetadataRepository` port and `FileMetadata` entity.
+- `infrastructure/metadata/sqlite_metadata_repository.py`: Implemented a production-grade SQLite backend using `aiosqlite`.
+- Relational schema for files and chunks with foreign key integrity and transactional support.
+- `docs/adr/0013-sqlite-for-metadata-persistence.md`: Documented the database architecture and schema decisions.
+- Unit tests for SQLite persistence, including chunk mapping and file metadata retrieval.
+
+### Added — Phase 7: Conflict Resolution
+- `domain/conflict.py`: Introduced `VersionVector` for causal tracking, `ConflictMetadata`, and `ConflictRepository` port.
+- `application/use_cases/conflict_resolution.py`: Implemented `DetectConflictUseCase` and `ResolveConflictUseCase` with pluggable `MergeStrategy`.
+- `LastWriterWinsStrategy` for automatic conflict resolution.
+- `docs/adr/0012-conflict-resolution-with-version-vectors.md`: Documented the version vector and conflict detection logic.
+- Unit tests for version vector arithmetic (increment, merge, comparison) and conflict detection/resolution use cases.
+
 ### Added — Phase 6: End-to-End Encryption
 - `domain/crypto.py`: Defined `KeyExchangeProvider`, `SessionKeyProvider`, and `AeadCipher` ports.
 - `infrastructure/crypto/pyca_crypto.py`: Implemented `cryptography.io` adapters for X25519, HKDF, AES-256-GCM, and ChaCha20-Poly1305.
@@ -25,315 +142,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Unit tests for discovery, repository, and peer tracking.
 
 ### Documented — Phase 3.5: Persistent Manifest Repository (retroactive, no code change)
-- A task brief describing a "Phase 4 — Persistent Manifest
-  Repository" (a new `JsonManifestRepository` adapter plus
-  `SaveManifestUseCase`/`LoadManifestUseCase`/`DeleteManifestUseCase`/
-  `ManifestExistsUseCase`) was checked against `ROADMAP.md` and the
-  actual codebase before any code was written. Two findings: (1) the
-  project's real Phase 4 is **Peer Discovery**, not a manifest
-  repository — that work is already `ROADMAP.md`'s Phase 8, Metadata
-  Database; (2) the functionality the brief asked for already exists
-  — `ChunkRepository`/`FileChunkRepository` (Phase 2) already provide
-  one-JSON-document-per-file, atomic crash-safe writes, OS-safe hashed
-  filenames, and meaningful rejection of corrupted/incomplete
-  manifests, all confirmed against the existing test suite rather than
-  assumed.
-- No new component was built — doing so would have duplicated
-  `ChunkRepository`/`FileChunkRepository` under a new name, repeating
-  the exact duplication ADR-0009 already rejected once.
-- `docs/adr/0010-persistent-manifest-storage-is-chunk-repository.md`
-  records this decision, what was verified against the existing code
-  and tests, and the alternatives rejected.
-- `ROADMAP.md`: added a **Phase 3.5** entry between Phase 3 and Phase
-  4 recording that persistent manifest storage was already delivered
-  in Phase 2/3 — Phase 4 (Peer Discovery) and every later phase keep
-  their existing numbers.
-- `docs/architecture.md`: the Repository-pattern row now notes that
-  `ChunkRepository`/`FileChunkRepository` *is* the persistent manifest
-  repository, referencing ADR-0010.
-- No source file changed: `FileChunkRepository` was audited and found
-  to already satisfy every substantive requirement in the brief; it is
-  untouched by this entry.
+- Documented that `ChunkRepository`/`FileChunkRepository` already provided persistent manifest storage.
+- Added `docs/adr/0010-persistent-manifest-storage-is-chunk-repository.md`.
 
 ### Added — Phase 3: Delta Synchronization
-- `domain/delta.py`: `ChunkAction` (`TRANSFER`/`REUSE`), `ChunkDeltaEntry`,
-  `DeltaPlan` (immutable value objects) and `DeltaCalculator` — a
-  stateless domain service that diffs a freshly computed manifest
-  against a previously recorded baseline. Chunks are matched by
-  content hash across the *entire* baseline, not by index, so a
-  chunk that changed position but kept its bytes is still recognized
-  as reusable — see ADR-0009.
-- `domain/delta_exceptions.py`: `DeltaSyncError` and
-  `IncompatibleBaselineError`, `UnhashedChunkError`.
-- `application/use_cases/compute_delta.py`: `ComputeDeltaUseCase` —
-  loads the baseline manifest via the existing (Phase 2)
-  `ChunkRepository` port, builds the current manifest via
-  `CalculateChunkHashesUseCase`, and returns the computed
-  `DeltaPlan`. Deliberately read-only: it never persists the new
-  manifest as the baseline itself, since nothing has actually been
-  transferred yet at this phase — that's left to an explicit
-  `repository.save(plan.current)` call once a caller (the Phase 5
-  Transfer Engine) has confirmed the chunks in
-  `plan.chunks_to_transfer` actually reached a peer.
-- No new infrastructure or cache: `FileChunkRepository` from Phase 2
-  is reused unchanged as the chunk cache the roadmap calls for — see
-  ADR-0009 for why a second cache/port would have been pure
-  duplication.
-- 21 new tests across `tests/unit/domain/` (`DeltaCalculator`,
-  `DeltaPlan`'s derived properties, position-independent hash
-  matching, `IncompatibleBaselineError`/`UnhashedChunkError`),
-  `tests/unit/application/use_cases/` (`ComputeDeltaUseCase`
-  orchestration via `FakeChunkRepository`), and
-  `tests/integration/` (real `StreamingChunkReader` +
-  `SHA256HashProvider` + `FileChunkRepository`: first sync, an
-  untouched re-sync, an appended tail, and a single edited chunk, each
-  asserting exactly which chunks are flagged for transfer).
-- `docs/adr/0009-content-addressable-delta-computation.md`: why
-  delta computation reuses the Phase 2 `ChunkRepository` as the chunk
-  cache instead of introducing a new one, and why chunks are matched
-  by content hash rather than position.
-- `ROADMAP.md` updated to mark Phase 3 complete.
-
-### Fixed — pre-Phase-3 repository audit
-- `domain/chunking.py` and `domain/chunk_exceptions.py` docstrings
-  referenced a non-existent ADR filename
-  (`0007-chunk-engine-strategy-pattern-and-sync-core.md`) — the real
-  file is `0007-chunking-strategy-as-a-pluggable-port.md`. Both
-  docstrings now point to the correct filename; behavior is
-  unaffected (documentation-only).
+- `domain/delta.py`: `DeltaCalculator` for content-hash comparison.
+- `application/use_cases/compute_delta.py`: `ComputeDeltaUseCase` for identifying chunks to transfer.
 
 ### Added — Phase 2: Chunk Engine
-- Streaming, bounded-memory file chunking and a SHA-256 hashing engine.
-  Designed to process files far larger than available RAM (targeting
-  100GB+) without ever loading a full file into memory — peak memory is
-  bounded by chunk size, not file size (verified empirically in
-  `tests/chunking/test_streaming_chunk_reader_filesystem.py` via
-  `tracemalloc`, and in the benchmark results below).
-- `domain/chunk.py`: `Chunk`, `ChunkHash`, `ChunkMetadata`,
-  `ChunkCollection` (immutable value objects, `frozen`/`slots`
-  dataclasses) and the `ChunkAlgorithm` enum.
-- `domain/chunking.py`: the `ChunkingStrategy` port (Strategy pattern —
-  see ADR-0007), and the `ChunkReader`, `ChunkHasher`, `ChunkWriter`,
-  `ChunkRepository` ports. Pure Python; no I/O, no hashing library
-  import.
-- `domain/chunk_exceptions.py`: `ChunkingError` and friends
-  (`InvalidChunkSizeError`, `ChunkSourceNotFoundError`,
-  `ChunkSourceAccessError`, `ChunkVerificationError`).
-- `shared/exceptions.py`: `ChunkEngineError`, the shared root for
-  chunk-engine infrastructure failures with no domain meaning.
-- `infrastructure/chunking/streaming_chunk_reader.py`:
-  `FixedSizeChunkingStrategy` (default 4 MiB, configurable) and
-  `StreamingChunkReader` — reads in bounded blocks (capped at 16 MiB
-  regardless of configured chunk size), tolerant of short/interrupted
-  `readinto()` reads, with deterministic (UUID5-derived) chunk IDs.
-- `infrastructure/chunking/sha256_hash_provider.py`:
-  `SHA256HashProvider` — `hashlib` only, feeds the hasher in bounded
-  `memoryview` sub-blocks to avoid copying.
-- `infrastructure/chunking/chunk_file_writer.py`: `ChunkFileWriter` —
-  atomic writes (temp file + `fsync` + rename) with exception-safe
-  cleanup on failure.
-- `infrastructure/chunking/file_chunk_repository.py`:
-  `FileChunkRepository` — a temporary filesystem-backed
-  `ChunkRepository` (JSON manifest per file); the SQLite-backed
-  implementation planned for Phase 8 will sit behind the same port.
-- `application/use_cases/chunk_file.py`: `ChunkFileUseCase` — chunks
-  and hashes a file, streaming.
-- `application/use_cases/verify_chunk.py`: `VerifyChunkUseCase` —
-  re-hashes a chunk and compares against its recorded hash.
-- `application/use_cases/calculate_chunk_hashes.py`:
-  `CalculateChunkHashesUseCase` — hashes a file's chunks without ever
-  retaining chunk bytes; can build a full `ChunkCollection` manifest.
-- `utils/async_iter.py`: `iter_in_thread`, a generic blocking-iterator-
-  to-async-iterator bridge (see ADR-0008) — not chunk-engine-specific,
-  reusable by any future phase with the same need.
-- 147 new tests (258 total) across `tests/unit/`, `tests/chunking/`
-  (real-filesystem, realistic scale), `tests/integration/`, and
-  `tests/property/` (Hypothesis property-based tests). 98% coverage on
-  `src/securesync/` (100% on every Phase 2 module; the only misses are
-  unreachable abstract-method stubs, matching the Phase 1 baseline
-  pattern).
-- `benchmarks/_common.py`, `benchmarks/bench_hashing.py`,
-  `benchmarks/bench_chunking.py`, `benchmarks/__main__.py`: the first
-  populated benchmarks, per the methodology in `docs/performance.md`
-  (median of N runs + p95, peak/average memory via `tracemalloc`, a
-  smoke set for CI and a full set for scheduled runs). See "Benchmark
-  results" below.
-- `docs/adr/0007-chunking-strategy-as-a-pluggable-port.md`: why
-  chunking-boundary decisions are a pluggable Strategy-pattern port,
-  reserving content-defined chunking for a later phase without a
-  breaking change.
-- `docs/adr/0008-synchronous-chunk-engine-core-with-async-boundary.md`:
-  why the chunk engine's domain/infrastructure layers are synchronous
-  while its use cases stay `async`, bridged via `asyncio.to_thread`.
-- `docs/architecture.md`, `docs/documentation-plan.md`, `ROADMAP.md`,
-  `benchmarks/README.md` updated to reflect Phase 2 as implemented.
-
-#### Benchmark results
-
-Measured on a single-vCPU sandboxed VM (Intel Xeon @ 2.80GHz, Python
-3.12.3, Linux) — see `docs/performance.md` §4: exact numbers are
-meaningless without this context, and are expected to differ
-(likely favorably) on real developer/CI hardware. Full methodology run
-(`python -m benchmarks --full`); N=10 runs per size, median reported.
-
-**Hashing** (`SHA256HashProvider`, 4 MiB buffer reused per call):
-
-| Size | Median | Throughput | Peak memory |
-|---|---|---|---|
-| 1KB | 0.02ms | 57 MB/s | 1.6 KiB |
-| 1MB | 2.72ms | 368 MB/s | 1.0 MiB |
-| 100MB | 259ms | 386 MB/s | 696 B |
-| 10GB | 26.6s | 384 MB/s | 696 B |
-
-**Chunking** (`StreamingChunkReader`, real files, 4 MiB chunks):
-
-| Size | Median | Throughput | Peak memory |
-|---|---|---|---|
-| 1KB | 0.43ms | 2.3 MB/s | 4.0 MiB |
-| 1MB | 0.92ms | 1085 MB/s | 7.0 MiB |
-| 100MB | 66.3ms | 1509 MB/s | 20.0 MiB |
-| 10GB | *skipped: insufficient disk space in this environment (9.7GB free); `bench_chunking.py` detects this and skips gracefully rather than failing partway through file generation — see `has_disk_space_for` in `benchmarks/_common.py`.* | | |
-
-Peak memory for both benchmarks stays within a small, roughly constant
-range across four orders of magnitude of input size — the qualitative
-property the design targets — rather than scaling with file size.
-
-### Fixed — pre-implementation review (Phase 2)
-- A first draft of `VerifyChunkUseCase` computed the hash synchronously
-  on the calling coroutine before handing an already-computed value to
-  the thread-offload helper, defeating the point of offloading it at
-  all — caught while writing `tests/unit/application/use_cases/test_verify_chunk_use_case.py`;
-  fixed to call `asyncio.to_thread(hasher.hash, data)` directly.
-- `ChunkFileWriter`'s failure-cleanup path could itself raise
-  (`NotADirectoryError` when the destination's parent isn't a real
-  directory), masking the original write failure entirely — caught by
-  `test_write_failure_error_chains_original_cause`; the cleanup is now
-  wrapped in `contextlib.suppress(OSError)` so it can never raise a new
-  exception that hides the one being reported to the caller.
+- Streaming, bounded-memory file chunking and SHA-256 hashing.
 
 ### Added — Phase 1: Filesystem Watcher
-- First real application code in the repository. Implements filesystem
-  monitoring (create/modify/delete/move/rename), across multiple
-  directories, optionally recursive, with debouncing of duplicate
-  rapid-fire events, async dispatch, graceful shutdown, and a
-  thread-safe Observer pattern — behind a domain port so no other layer
-  depends on `watchdog` directly.
-- `domain/events.py`: `FileSystemEvent` (immutable value object) and
-  `FileSystemEventType` enum, including `is_rename` and `dedup_key`.
-- `domain/watcher.py`: the `FileWatcher` port (subject) and the
-  `FileSystemEventObserver` protocol (observer) — the Observer pattern
-  boundary. Pure Python; no `watchdog` import.
-- `domain/exceptions.py`: `WatcherError` and friends
-  (`WatcherAlreadyRunningError`, `InvalidWatchTargetError`).
-- `shared/exceptions.py`: `SecureSyncError` (base) and
-  `FileWatcherError`, the shared root for cross-layer infrastructure
-  failures.
-- `infrastructure/filesystem/watchdog_watcher.py`: `WatchdogFileWatcher`,
-  the `watchdog`-based `FileWatcher` adapter — the only module that
-  imports `watchdog`.
-- `infrastructure/filesystem/debounce.py`: thread-safe `EventDebouncer`
-  with bounded memory (stale entries are evicted opportunistically, so a
-  long-running watcher over a high-churn directory doesn't leak memory).
-- `infrastructure/filesystem/event_translator.py`: pure translation from
-  raw `watchdog` events to domain `FileSystemEvent` objects, plus
-  `is_ignorable_event_type` so routine, in-scope noise (file open/close
-  notifications) is logged at DEBUG rather than WARNING.
-- `application/use_cases/monitor_directories.py`:
-  `MonitorDirectoriesUseCase`, orchestrating the watcher's lifecycle and
-  observer registration; usable as an `async with` context manager for
-  guaranteed graceful shutdown.
-- `application/observers/logging_observer.py`:
-  `LoggingFileSystemEventObserver`, a minimal reference observer.
-- 111 tests across `tests/unit/`, `tests/filesystem/` (real temp-directory,
-  real OS-event tests), and `tests/integration/` (use case + real
-  adapter). 98% coverage on `src/securesync/` (100% on every Phase 1
-  module).
-- `docs/adr/0006-filesystem-watcher-port-and-watchdog-adapter.md`: the
-  decision record for the port/adapter split and the debounce/dispatch
-  design.
-- `docs/architecture.md` updated: `FileWatcher` added to the domain
-  layer's port list, the Observer pattern entry marked implemented, a
-  new Filesystem Watcher class diagram, and the `asyncio`/`watchdog`
-  technology rows marked implemented.
-- `docs/development.md`: real debugging tips for the watcher (inotify
-  watch limits, structured logging, thread/event-loop interaction)
-  replacing the Phase 0 placeholder.
-
-### Fixed — Phase 0.5 audit (pre-Phase-1 design review)
-- **Mermaid syntax bugs**: 12 instances of literal `\n` (rendered as text,
-  not a line break) in `docs/networking.md` and `docs/deployment.md`
-  corrected to `<br/>`; invalid dotted-arrow label syntax in
-  `docs/architecture.md` corrected to the pipe-delimited form; a
-  multi-parameter generic in the class diagram simplified to avoid
-  ambiguous parsing.
-- **CI would have failed on the first PR**: `pytest` exits with code 5
-  ("no tests collected") since no tests exist before Phase 1 — verified by
-  actually running it. `.github/workflows/ci.yml` and `Makefile`
-  (`test`, `test-cov`) now explicitly tolerate that exit code as a pass,
-  with a clear note that any *other* non-zero code still fails the build.
-- **Stale status text**: README banner said "Phase 0" while the badge said
-  "Phase 0.5"; the Configuration and FAQ sections said linked docs weren't
-  "published yet" when they already existed. All corrected.
-- **Inconsistent doc conventions**: `docs/development.md` and
-  `docs/protocol.md` titles didn't match the plain single-word convention
-  used by every sibling doc; `Status:` line formatting normalized across
-  `docs/architecture.md` and `docs/troubleshooting.md`.
-- **Version/config drift**: added the missing Python 3.13 classifier to
-  `pyproject.toml` (CI already tested against it); deduplicated coverage
-  flags repeated across `pyproject.toml`, `Makefile`, and CI into a single
-  source of truth; documented that the `securesync` CLI entry point has no
-  target module yet (added in Phase 9, by design).
-- **Missing `.dockerignore`** — added, so the Docker build context excludes
-  `.git`, caches, docs, and tests.
-- **Stray/redundant `.gitkeep` files** removed from the repo root,
-  `.github/`, `.github/workflows/`, and `tests/` (each already had real
-  tracked content or tracked subdirectories, making the marker files dead
-  weight).
-- Verified (not just reviewed): zero broken local markdown links, zero
-  orphaned files, all 9 Mermaid diagrams have balanced brackets and valid
-  diagram-type declarations, all YAML/TOML files parse, the config schema
-  in `docs/configuration.md` structurally matches
-  `examples/config/peer-a.yaml`, and `ruff`/`black --check`/`mypy --strict`
-  all pass cleanly against the current scaffold.
-
-### Added — Phase 0.5: Repository & Documentation Polish
-- Community health files: `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`,
-  `SECURITY.md`.
-- Tooling config: `.editorconfig`, `.pre-commit-config.yaml`, `Makefile`.
-- Deployment scaffolding: `Dockerfile`, `docker-compose.yml`.
-- GitHub automation: `.github/workflows/ci.yml`, issue templates
-  (bug report, feature request, config), `PULL_REQUEST_TEMPLATE.md`,
-  `CODEOWNERS`.
-- Full documentation set: `docs/networking.md`, `docs/protocol.md`,
-  `docs/security.md` (full threat model), `docs/performance.md`
-  (benchmark plan), `docs/development.md`, `docs/deployment.md`,
-  `docs/configuration.md`, `docs/troubleshooting.md`.
-- Five Architecture Decision Records (`docs/adr/0001`–`0005`) covering
-  Clean Architecture, the async runtime, the cryptography library, the
-  wire protocol design, and the metadata store.
-- Class, package, and component diagrams added to `docs/architecture.md`;
-  sequence diagrams added to `docs/protocol.md` and `docs/networking.md`;
-  a network diagram in `docs/networking.md`; a deployment diagram in
-  `docs/deployment.md`.
-- `assets/logo.svg` (original mark) and `assets/README.md` tracking
-  screenshot placeholders.
-- `benchmarks/README.md` describing how the (not-yet-populated) benchmark
-  suite will be run.
-- Minimal `__init__.py` package markers under `src/securesync/` (no
-  application logic — Phase 1 introduces the first real code).
-- README expanded with a Documentation section, Community section, and
-  updated badges.
-
-### Added — Phase 0: Architecture & Scaffolding
-- Clean Architecture layer structure (`presentation`, `application`,
-  `domain`, `infrastructure`, `core`, `shared`, `config`, `utils`).
-- Test directory structure (`unit`, `integration`, `network`,
-  `filesystem`, `security`, `benchmark`).
-- `pyproject.toml` with dependency and tooling decisions (ruff, black,
-  mypy strict mode, pytest + pytest-asyncio + coverage).
-- Initial `README.md` structure.
-- `docs/architecture.md` describing layers, SOLID principles, design
-  patterns, and technology decisions.
-- `docs/documentation-plan.md` tracking every doc file and when it lands.
-- `ROADMAP.md` covering Phases 0–10 and the advanced-feature backlog.
-- `LICENSE` (MIT), `.gitignore`.
+- Real-time filesystem monitoring using `watchdog`.

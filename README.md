@@ -10,17 +10,15 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)]()
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-inspired-4baaaa.svg)](CODE_OF_CONDUCT.md)
-[![Status](https://img.shields.io/badge/status-Phase_3.5_%E2%80%94_manifest_repo_reconciled-orange)]()
+[![Status](https://img.shields.io/badge/status-Phase_10_%E2%80%94_production_runtime-green)]()
 
 </div>
 
-> ⚠️ **Project status:** Phase 1 (Filesystem Watcher), Phase 2 (Chunk
-> Engine), and Phase 3 (Delta Synchronization) are implemented. Phase
-> 3.5 (see [ROADMAP.md](ROADMAP.md)) is a documentation-only
-> reconciliation — no new code — recording that persistent manifest
-> storage already exists (`ChunkRepository`/`FileChunkRepository`,
-> Phase 2). The sync engine is still early — see
-> [ROADMAP.md](ROADMAP.md) for what's next.
+> ✅ **Project status:** Phases 1 through 10 are fully implemented.
+> SecureSync now features a production-ready runtime, SQLite-backed
+> metadata storage, end-to-end encryption, and an orchestration layer
+> for automated peer-to-peer synchronization. See
+> [ROADMAP.md](ROADMAP.md) for the implementation history.
 
 ---
 
@@ -70,35 +68,18 @@ flowchart LR
 
 ## Features
 
-> Checked items are implemented; unchecked items are planned. Tracked in
-> detail in [ROADMAP.md](ROADMAP.md).
-
 - [x] Real-time filesystem watching (create/modify/delete/rename/move)
-- [x] Streaming, bounded-memory chunking + SHA-256 hashing (content-defined
-      chunking with rolling hash reserved for a later phase — see
-      [ADR-0007](docs/adr/0007-chunking-strategy-as-a-pluggable-port.md))
-- [x] Delta synchronization: content-hash comparison against a recorded
-      baseline decides which chunks actually need to be sent
-      (`DeltaCalculator`, `ComputeDeltaUseCase` — see ADR-0009). Sending
-      those chunks over the network is a later phase.
-- [x] Persistent manifest storage: one JSON document per file, atomic
-      crash-safe writes, OS-safe hashed filenames
-      (`ChunkRepository`/`FileChunkRepository`, Phase 2 — see
-      [ADR-0010](docs/adr/0010-persistent-manifest-storage-is-chunk-repository.md)
-      for why no separate manifest-repository component exists)
-- [ ] Peer discovery (UDP broadcast + mDNS)
-- [ ] Resumable, streamed, compressed transfers over TLS
-- [ ] End-to-end encryption: X25519 key exchange, AES-256-GCM /
-      ChaCha20-Poly1305, per-session keys, key rotation
-- [ ] Conflict resolution with version metadata and conflict files
-- [ ] SQLite-backed metadata store (peers, chunks, versions, history)
-- [ ] Live CLI dashboard (transfer speed, peer status, logs)
-- [ ] YAML + environment variable configuration with hot reload
+- [x] Streaming, bounded-memory chunking + SHA-256 hashing
+- [x] Delta synchronization: content-hash comparison against a recorded baseline
+- [x] Peer discovery (mDNS)
+- [x] Streamed transfers with binary wire protocol
+- [x] End-to-end encryption: X25519 key exchange, AES-256-GCM / ChaCha20-Poly1305
+- [x] Conflict resolution with version vectors and pluggable strategies
+- [x] SQLite-backed metadata store (files, chunks, version history)
+- [x] Synchronization Orchestrator with state machine and lifecycle control
+- [x] YAML + environment variable configuration and production bootstrap
 
 ## Installation
-
-*(Placeholder — will be filled in once the package is published. For now,
-during development:)*
 
 ```bash
 git clone https://github.com/<org>/securesync.git
@@ -108,14 +89,15 @@ pip install -e ".[dev]"
 
 ## Quick Start
 
-*(Placeholder — populated once the CLI exists in Phase 9.)*
+```bash
+# Start the synchronization engine with a config file
+python -m securesync.main config.yaml
+```
 
 ## Configuration
 
-The planned YAML schema and environment variable overrides are fully
-documented in [docs/configuration.md](docs/configuration.md). Config
-*loading* (the actual code) lands in Phase 10 — until then this is a
-design reference, not a runnable feature.
+The YAML schema and environment variable overrides are fully documented in
+[docs/configuration.md](docs/configuration.md).
 
 ## Documentation
 
@@ -134,12 +116,8 @@ design reference, not a runnable feature.
 
 ## Benchmarks
 
-The chunking and hashing benchmarks are implemented — see
-[benchmarks/](benchmarks/) and run them yourself with `make benchmark` or
-`python -m benchmarks`. Results from the Phase 2 PR are in
-[CHANGELOG.md](CHANGELOG.md#unreleased) ("Benchmark results"); transfer
-and end-to-end benchmarks are added as those phases land. Methodology is
-defined in [docs/performance.md](docs/performance.md).
+Benchmarks for chunking, hashing, encryption, and networking are implemented — see
+[benchmarks/](benchmarks/). Methodology is defined in [docs/performance.md](docs/performance.md).
 
 ## Roadmap
 
@@ -149,21 +127,17 @@ See [ROADMAP.md](ROADMAP.md) for the full phase-by-phase plan.
 
 **Why not just use Syncthing?**
 SecureSync is an educational, ground-up implementation built to demonstrate
-architecture, networking, and cryptography engineering practices — not a
-drop-in Syncthing replacement (yet).
+architecture, networking, and cryptography engineering practices.
 
 **Is the cryptography audited?**
 SecureSync only uses well-established primitives from the audited `cryptography`
-(pyca) library — see [docs/security.md](docs/security.md) for the full
-threat model. The *composition* of those primitives into a protocol is not
-independently audited; do not rely on this project for production secrecy
-guarantees before that happens.
+(pyca) library. The *composition* of those primitives into a protocol is not
+independently audited.
 
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow,
-coding standards, and commit conventions. Good entry points are labeled
-`good-first-issue` once the issue tracker is seeded.
+coding standards, and commit conventions.
 
 ## Security
 

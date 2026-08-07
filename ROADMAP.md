@@ -59,16 +59,34 @@ Status is updated at the end of every phase alongside `CHANGELOG.md`.
 - [x] **Phase 6 — End-to-End Encryption**
       X25519 key exchange, HKDF session key derivation, AES-256-GCM and
       ChaCha20-Poly1305 AEAD ciphers (`cryptography.io` adapters).
-- [ ] **Phase 7 — Conflict Resolution**
-      Timestamp + version metadata, conflict files, vector-clock-ready
-      design.
-- [ ] **Phase 8 — Metadata Database**
-      SQLite schema for peers, chunks, hashes, versions, history, stats.
-- [ ] **Phase 9 — CLI Dashboard**
-      Typer commands, Rich live dashboard, progress bars, logs, peer
-      status.
-- [ ] **Phase 10 — Configuration System**
-      YAML + environment variables, validation, hot reload.
+- [x] **Phase 7 — Conflict Resolution**
+      Version vectors for causal tracking, conflict detection, and
+      pluggable merge strategies (Last Writer Wins).
+- [x] **Phase 8 — Metadata Database**
+      SQLite-backed repository for persistent storage of files, chunks,
+      and version history.
+- [x] **Phase 9 — Synchronization Orchestrator**
+      Central coordination of all components with a state machine and
+      lifecycle management.
+- [x] **Phase 10 — Production Runtime**
+      YAML configuration system, application bootstrap, and graceful
+      shutdown with signal handling.
+- [x] **Phase 10.5 — Real Integration (post-hoc audit)**
+      An audit of Phases 5, 6, 9, and 10 found real components built
+      and individually unit-tested but never actually wired together:
+      `SyncOrchestrator`'s injected use cases were never called outside
+      `__init__`; `main.py` used a hand-rolled `MagicMock` for all four
+      of them; the entire crypto layer (Phase 6) was never referenced
+      by anything else; `TransferTransport.request_chunks` had a
+      type-incorrect signature masked by a `# type: ignore`, with no
+      concrete implementation anywhere; and `core/protocol.py`'s CRC32
+      was never actually computed. All fixed and runtime-verified —
+      see ADR-0016 for the full account, including the one gap that's
+      still honestly open: no socket-based `TransferTransport` exists
+      yet, so cross-machine transfer isn't possible. A new
+      `InProcessTransferTransport` (real AEAD encryption, real
+      `core/protocol.py` framing) proves the crypto+transfer wiring is
+      correct for same-process peer pairs.
 
 ## Advanced features (introduced opportunistically, in the phase they fit)
 

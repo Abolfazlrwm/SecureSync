@@ -21,6 +21,7 @@ gets a new ADR that says so and links back, rather than editing history).
 | [0014](0014-synchronization-orchestrator-state-machine.md) | Synchronization Orchestrator State Machine | Accepted |
 | [0015](0015-production-runtime-and-configuration.md) | Production Runtime and Configuration | Accepted |
 | [0016](0016-in-process-encrypted-transport.md) | Real Use-Case Wiring, an In-Process Encrypted Transport, and the Disclosed Socket-Transport Gap | Accepted |
+| [0017](0017-tcp-transfer-transport.md) | A Real TCP Transport — and Why It Still Isn't Wired Into `main.py` | Accepted |
 
 ## Template for new ADRs
 

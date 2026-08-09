@@ -87,6 +87,18 @@ Status is updated at the end of every phase alongside `CHANGELOG.md`.
       `InProcessTransferTransport` (real AEAD encryption, real
       `core/protocol.py` framing) proves the crypto+transfer wiring is
       correct for same-process peer pairs.
+- [ ] **Phase 11 — Real Network Transport**
+      `TcpTransferTransport` (real `asyncio` sockets, length-prefixed
+      AEAD-encrypted framing) is built and verified over real
+      localhost sockets — see ADR-0017. Left unchecked because it's
+      not wired into `main.py` yet: it needs a per-session key that
+      nothing in this codebase currently negotiates between two real
+      processes. `PacketType.HELLO`/`KEY_EXCHANGE`/`AUTH` are declared
+      in `core/protocol.py` and `PycaKeyExchangeProvider` exists, but
+      no handshake calls them. That handshake — and resolving
+      `derive_session_keys`'s send/receive key-swap ambiguity as part
+      of it — is what remains before `main.py` can sync with a real
+      remote peer.
 
 ## Advanced features (introduced opportunistically, in the phase they fit)
 

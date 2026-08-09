@@ -5,6 +5,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Phase 11: Real Network Transport (partial — not yet wired into main.py)
+- `infrastructure/networking/tcp_transport.py` (new): `TcpTransferTransport` —
+  a real `TransferTransport` implementation over `asyncio` TCP
+  sockets. `start()`/`stop()` open and close a real listening socket;
+  `send_chunk` opens a short-lived outbound connection per chunk;
+  `request_chunks` reads from an inbox populated by the listening
+  server. Each connection carries one length-prefixed (TCP has no
+  message boundaries of its own), AEAD-encrypted envelope using the
+  same `core/protocol.py` framing as `InProcessTransferTransport`.
+  Verified over real localhost sockets, not just reasoned about:
+  bidirectional multi-chunk transfer through the unmodified
+  `UploadChunksUseCase`/`DownloadChunksUseCase`, and a wrong key
+  correctly raising `cryptography.exceptions.InvalidTag`.
+- 4 new tests in `tests/unit/infrastructure/networking/test_tcp_transport.py`,
+  all running against real sockets on real (test-local) ports.
+- `docs/adr/0017-tcp-transfer-transport.md`: why no TLS layer was
+  added (message-level AEAD already provides confidentiality and
+  integrity), and — just as importantly — why this still isn't wired
+  into `main.py`: no code anywhere establishes the per-session key it
+  needs. `PacketType.HELLO`/`KEY_EXCHANGE`/`AUTH` are declared and
+  `PycaKeyExchangeProvider` exists, but no handshake calls them yet.
+  Hardcoding a shared key into `main.py` to make the wiring "complete"
+  was considered and rejected — see the ADR's "Rejected" section.
+- `ROADMAP.md`: added a **Phase 11** entry, left unchecked, naming
+  the handshake as the specific remaining prerequisite.
+
 ### Fixed — Phase 10.5: Real Integration (post-hoc audit)
 - `core/protocol.py`: `Packet.encode()` never actually computed a
   CRC32 (comment: *"In a real implementation, CRC would be calculated

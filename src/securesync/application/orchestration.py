@@ -14,6 +14,7 @@ from securesync.application.use_cases.transfer_chunks import (
     DownloadChunksUseCase,
     UploadChunksUseCase,
 )
+from securesync.domain.handshake import SessionCoordinator
 from securesync.domain.metadata import MetadataRepository
 from securesync.domain.networking import Peer
 
@@ -66,6 +67,7 @@ class SyncOrchestrator:
         conflict_use_case: DetectConflictUseCase,
         download_use_case: DownloadChunksUseCase | None = None,
         upload_use_case: UploadChunksUseCase | None = None,
+        session_coordinator: SessionCoordinator | None = None,
     ) -> None:
         """Initialize the orchestrator.
 
@@ -78,12 +80,19 @@ class SyncOrchestrator:
                 transport is available.
             upload_use_case: Uploads chunks to a peer, if a real
                 transport is available.
+            session_coordinator: Establishes an encrypted, authenticated
+                session with a newly discovered peer (see
+                ``docs/adr/0020-multi-peer-session-keys-and-main-py-wiring.md``).
+                Without one, peers are tracked but chunk transfer has
+                no negotiated keys to use even if `download_use_case`/
+                `upload_use_case` are set.
         """
         self._metadata_repo = metadata_repo
         self._discovery_use_case = discovery_use_case
         self._download_use_case = download_use_case
         self._upload_use_case = upload_use_case
         self._conflict_use_case = conflict_use_case
+        self._session_coordinator = session_coordinator
 
         self._state = SyncState.IDLE
         self._stats = SyncStats()
@@ -191,12 +200,13 @@ class SyncOrchestrator:
     async def handle_peer_discovered(self, peer: Peer) -> None:
         """React to a new peer being discovered.
 
-        Marks the peer active and refreshes the count of locally known
-        files against :attr:`_metadata_repo`. Actually exchanging
-        manifests and chunks with ``peer`` requires a remote-manifest
-        RPC this codebase doesn't implement yet (see
-        ``docs/adr/0016-in-process-encrypted-transport.md``); when
-        that lands, this is the method that will call
+        Marks the peer active, establishes an encrypted session with
+        it (if a `session_coordinator` is configured), and refreshes
+        the count of locally known files against :attr:`_metadata_repo`.
+        Actually exchanging manifests and chunks with ``peer`` still
+        requires a remote-manifest RPC this codebase doesn't implement
+        yet — see ``docs/adr/0020-multi-peer-session-keys-and-main-py-wiring.md``;
+        when that lands, this is the method that will call
         :attr:`_conflict_use_case` per file and then
         :attr:`_download_use_case`/:attr:`_upload_use_case` for
         whatever :class:`~securesync.domain.delta.DeltaPlan` results.
@@ -206,6 +216,15 @@ class SyncOrchestrator:
         """
         self._active_peers.add(peer.device_id)
         logger.info("peer_added_to_sync", device_id=peer.device_id)
+
+        if self._session_coordinator is not None:
+            try:
+                await self._session_coordinator.ensure_session(peer)
+            except Exception as e:
+                self._stats.errors_encountered += 1
+                logger.warning(
+                    "session_establishment_failed", device_id=peer.device_id, error=str(e)
+                )
 
         local_files = await self._metadata_repo.list_all_files()
         self._stats.files_processed = len(local_files)

@@ -17,7 +17,10 @@ from securesync.infrastructure.networking.in_process_transport import (
     InProcessTransferTransport,
 )
 
-KEY = b"k" * 32
+# A's send_key must equal B's receive_key and vice versa — the same
+# invariant a real X25519Handshake produces (see test_x25519_handshake.py).
+KEY_1 = b"1" * 32
+KEY_2 = b"2" * 32
 
 
 def _peer(device_id: str) -> Peer:
@@ -39,15 +42,22 @@ def _chunk(chunk_id: str, data: bytes, digest: str) -> Chunk:
     return Chunk(metadata=metadata, data=data)
 
 
+def _paired_transports(
+    network: InProcessNetwork, cipher: AesGcmCipher
+) -> tuple[InProcessTransferTransport, InProcessTransferTransport]:
+    """Build two transports with correctly matched send/receive keys."""
+    transport_a = InProcessTransferTransport("dev-a", network, cipher, KEY_1, KEY_2)
+    transport_b = InProcessTransferTransport("dev-b", network, cipher, KEY_2, KEY_1)
+    return transport_a, transport_b
+
+
 class TestSendAndRequestChunks:
     """Tests for the transport's own send_chunk/request_chunks pair."""
 
     async def test_a_sends_b_receives_the_same_chunk(self) -> None:
         """A chunk sent by one peer is received intact by its addressee."""
         network = InProcessNetwork()
-        cipher = AesGcmCipher()
-        transport_a = InProcessTransferTransport("dev-a", network, cipher, KEY)
-        transport_b = InProcessTransferTransport("dev-b", network, cipher, KEY)
+        transport_a, transport_b = _paired_transports(network, AesGcmCipher())
         chunk = _chunk("c1", b"hello world", "a" * 64)
 
         await transport_a.send_chunk(_peer("dev-b"), chunk)
@@ -60,9 +70,7 @@ class TestSendAndRequestChunks:
     async def test_request_chunks_ignores_unrequested_digests(self) -> None:
         """Only chunks whose hash was actually requested are yielded."""
         network = InProcessNetwork()
-        cipher = AesGcmCipher()
-        transport_a = InProcessTransferTransport("dev-a", network, cipher, KEY)
-        transport_b = InProcessTransferTransport("dev-b", network, cipher, KEY)
+        transport_a, transport_b = _paired_transports(network, AesGcmCipher())
 
         await transport_a.send_chunk(_peer("dev-b"), _chunk("c1", b"one", "a" * 64))
         await transport_a.send_chunk(_peer("dev-b"), _chunk("c2", b"two", "b" * 64))
@@ -73,11 +81,11 @@ class TestSendAndRequestChunks:
         assert received[0].metadata.chunk_id == "c2"
 
     async def test_wrong_key_fails_to_decrypt(self) -> None:
-        """A receiver with a different key can't decrypt what was sent."""
+        """A receiver with a mismatched receive_key can't decrypt what was sent."""
         network = InProcessNetwork()
         cipher = AesGcmCipher()
-        transport_a = InProcessTransferTransport("dev-a", network, cipher, KEY)
-        transport_b = InProcessTransferTransport("dev-b", network, cipher, b"x" * 32)
+        transport_a = InProcessTransferTransport("dev-a", network, cipher, KEY_1, KEY_2)
+        transport_b = InProcessTransferTransport("dev-b", network, cipher, KEY_2, b"x" * 32)
 
         await transport_a.send_chunk(_peer("dev-b"), _chunk("c1", b"secret", "a" * 64))
 
@@ -91,9 +99,7 @@ class TestAgainstRealUseCases:
 
     async def test_upload_then_download_round_trips_multiple_chunks(self) -> None:
         network = InProcessNetwork()
-        cipher = AesGcmCipher()
-        transport_a = InProcessTransferTransport("dev-a", network, cipher, KEY)
-        transport_b = InProcessTransferTransport("dev-b", network, cipher, KEY)
+        transport_a, transport_b = _paired_transports(network, AesGcmCipher())
         upload = UploadChunksUseCase(transport_a)
         download = DownloadChunksUseCase(transport_b)
 
@@ -102,9 +108,6 @@ class TestAgainstRealUseCases:
             yield _chunk("c2", b"def", "b" * 64)
 
         await upload.execute(_peer("dev-b"), chunks_to_send())
-        received = [
-            c
-            async for c in download.execute(_peer("dev-a"), ["a" * 64, "b" * 64])
-        ]
+        received = [c async for c in download.execute(_peer("dev-a"), ["a" * 64, "b" * 64])]
 
         assert [c.data for c in received] == [b"abc", b"def"]

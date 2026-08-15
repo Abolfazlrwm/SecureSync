@@ -99,6 +99,38 @@ Status is updated at the end of every phase alongside `CHANGELOG.md`.
       `derive_session_keys`'s send/receive key-swap ambiguity as part
       of it — is what remains before `main.py` can sync with a real
       remote peer.
+- [x] **Phase 12 — Key Exchange Handshake**
+      `X25519Handshake` performs a real X25519 exchange over a real
+      TCP connection and resolves the exact key-swap ambiguity Phase
+      11 named: initiator and responder deterministically get
+      complementary `(send_key, receive_key)` pairs — verified over a
+      real socket (`initiator.send_key == responder.receive_key` and
+      vice versa). Full chain verified end to end: handshake →
+      negotiated keys (no hardcoded key) → real encrypted chunk
+      transfer through the unmodified application use cases. See
+      ADR-0018. The two gaps this entry originally disclosed — peer
+      authentication, and wiring into `main.py`/`SyncOrchestrator` —
+      are now both resolved; see Phase 13.
+- [x] **Phase 13 — Peer Authentication and Full main.py Wiring**
+      A persistent Ed25519 identity per device now signs every
+      handshake message, and a trust-on-first-use store
+      (`TrustedPeerRepository`) pins each peer's identity key across
+      handshakes, rejecting a later handshake that presents a
+      different key for an already-trusted `device_id` — verified
+      with an actual impersonation attempt in this session (rejected).
+      See ADR-0019. `TcpTransferTransport` was refactored from one
+      fixed key pair to a `SessionKeyStore` (`device_id -> PeerSession`),
+      so a device can hold independently-keyed sessions with multiple
+      peers at once; the chunk-transfer port is exchanged as part of
+      the handshake itself, not guessed from a convention.
+      `SyncOrchestrator` gained an optional `session_coordinator` that
+      establishes a session with each newly discovered peer, failing
+      gracefully (logged, counted in `stats.errors_encountered`) if
+      one peer's handshake fails without affecting others. `main.py`
+      is now fully wired — real identity, real handshake server, real
+      multi-peer transport, `download_use_case`/`upload_use_case` no
+      longer `None` — verified by actually running `bootstrap()` in
+      this session. See ADR-0020.
 
 ## Advanced features (introduced opportunistically, in the phase they fit)
 

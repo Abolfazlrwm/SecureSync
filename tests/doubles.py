@@ -8,6 +8,8 @@ without any real I/O. ``FakeFileWatcher`` is that fake for
 ``domain.watcher.FileSystemEventObserver``. ``FakeChunkReader``,
 ``FakeChunkHasher``, ``FakeChunkWriter``, and ``FakeChunkRepository``
 are the equivalents for the ``domain.chunking`` ports.
+``FakeIdentityProvider`` and ``FakeTrustedPeerRepository`` are the
+equivalents for ``domain.identity``'s ports.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from securesync.domain.chunking import (
     ChunkWriter,
 )
 from securesync.domain.events import FileSystemEvent
+from securesync.domain.identity import IdentityKeyPair, IdentityProvider, TrustedPeerRepository
 from securesync.domain.watcher import FileSystemEventObserver, FileWatcher
 
 
@@ -268,3 +271,47 @@ class FakeChunkRepository(ChunkRepository):
         """Return the previously saved collection, if any."""
         self.load_calls += 1
         return self._store.get(source_path)
+
+
+class FakeIdentityProvider(IdentityProvider):
+    """In-memory fake ``IdentityProvider`` — no real Ed25519, no disk I/O.
+
+    Uses the same bytes for both "private" and "public" key (there's
+    no real asymmetric cryptography here), so ``sign``/``verify`` can
+    be simple deterministic string matching instead of needing a real
+    keypair relationship.
+    """
+
+    def __init__(self, identity: IdentityKeyPair | None = None) -> None:
+        """Initialize with a fixed or default fake identity."""
+        self._identity = identity or IdentityKeyPair(
+            private_key=b"fake-key", public_key=b"fake-key"
+        )
+
+    def load_or_create(self) -> IdentityKeyPair:
+        """Return the fixed fake identity."""
+        return self._identity
+
+    def sign(self, private_key: bytes, message: bytes) -> bytes:
+        """Return a deterministic marker combining the key and message."""
+        return private_key + b":" + message
+
+    def verify(self, public_key: bytes, message: bytes, signature: bytes) -> bool:
+        """Verify the marker was produced by the same key bytes."""
+        return signature == public_key + b":" + message
+
+
+class FakeTrustedPeerRepository(TrustedPeerRepository):
+    """In-memory fake ``TrustedPeerRepository`` — a dict keyed by device ID."""
+
+    def __init__(self) -> None:
+        """Initialize with an empty trust store."""
+        self._store: dict[str, bytes] = {}
+
+    async def get_trusted_key(self, device_id: str) -> bytes | None:
+        """Return the pinned key for `device_id`, if any."""
+        return self._store.get(device_id)
+
+    async def trust(self, device_id: str, public_key: bytes) -> None:
+        """Pin `public_key` as trusted for `device_id`."""
+        self._store[device_id] = public_key

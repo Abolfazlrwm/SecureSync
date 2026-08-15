@@ -28,6 +28,7 @@ from securesync.domain.chunk import Chunk, ChunkAlgorithm, ChunkHash, ChunkMetad
 from securesync.domain.crypto import NONCE_SIZE, TAG_SIZE, AeadCipher, EncryptedPayload
 from securesync.domain.networking import Peer
 from securesync.domain.transfer import TransferTransport
+from securesync.infrastructure.networking.session_key_store import SessionKeyStore
 
 logger = structlog.get_logger(__name__)
 
@@ -52,7 +53,7 @@ class TcpTransferTransport(TransferTransport):
         listen_host: str,
         listen_port: int,
         cipher: AeadCipher,
-        key: bytes,
+        session_keys: SessionKeyStore,
     ) -> None:
         """Initialize the transport.
 
@@ -62,13 +63,17 @@ class TcpTransferTransport(TransferTransport):
             listen_host: Host/interface to accept inbound connections on.
             listen_port: Port to accept inbound connections on.
             cipher: The AEAD cipher used to encrypt and decrypt every message.
-            key: The shared symmetric key `cipher` encrypts and decrypts with.
+            session_keys: Per-peer `(send_key, receive_key)` registry,
+                populated as
+                :class:`~securesync.infrastructure.networking.x25519_handshake.X25519Handshake`
+                handshakes complete — see
+                ``docs/adr/0020-multi-peer-session-keys-and-main-py-wiring.md``.
         """
         self._own_device_id = own_device_id
         self._listen_host = listen_host
         self._listen_port = listen_port
         self._cipher = cipher
-        self._key = key
+        self._session_keys = session_keys
         self._message_id = 0
         self._inbox: asyncio.Queue[bytes] = asyncio.Queue()
         self._server: asyncio.Server | None = None
@@ -145,12 +150,15 @@ class TcpTransferTransport(TransferTransport):
         framed = Packet(header=header, payload=payload).encode()
 
         nonce = os.urandom(NONCE_SIZE)
+        session = self._session_keys.get(peer.device_id)
         encrypted = self._cipher.encrypt(
-            framed, self._key, nonce, associated_data=peer.device_id.encode("utf-8")
+            framed, session.send_key, nonce, associated_data=peer.device_id.encode("utf-8")
         )
         envelope = self._pack_envelope(encrypted)
 
-        reader, writer = await asyncio.open_connection(peer.address.ip_address, peer.address.port)
+        reader, writer = await asyncio.open_connection(
+            peer.address.ip_address, session.transfer_port
+        )
         try:
             writer.write(struct.pack(_LENGTH_PREFIX_FORMAT, len(envelope)) + envelope)
             await writer.drain()
@@ -163,26 +171,28 @@ class TcpTransferTransport(TransferTransport):
         logger.info("chunk_sent_tcp", peer=peer.device_id, chunk_id=chunk.metadata.chunk_id)
 
     async def request_chunks(self, peer: Peer, chunk_hashes: list[str]) -> AsyncIterator[Chunk]:
-        """Yield chunks received from any inbound connection, matching ``chunk_hashes``.
+        """Yield chunks received from `peer`, matching ``chunk_hashes``.
 
         Args:
-            peer: Unused directly (kept for parity with the
-                `TransferTransport` port) — this transport has one
-                shared inbox for all inbound connections, since
-                distinguishing senders isn't needed for this
-                transport's current scope.
+            peer: The peer these chunks are expected to have come
+                from — its negotiated `receive_key` is looked up from
+                the session key store to decrypt them.
             chunk_hashes: The hex digests of the chunks to wait for.
 
         Yields:
             Each matching :class:`Chunk`, decrypted and reconstructed,
             as it arrives.
+
+        Raises:
+            NoSessionKeyError: If no handshake has completed for `peer` yet.
         """
         remaining = set(chunk_hashes)
+        session = self._session_keys.get(peer.device_id)
         while remaining:
             envelope = await self._inbox.get()
             encrypted = self._unpack_envelope(envelope)
             framed = self._cipher.decrypt(
-                encrypted, self._key, associated_data=self._own_device_id.encode("utf-8")
+                encrypted, session.receive_key, associated_data=self._own_device_id.encode("utf-8")
             )
             packet = Packet.decode(framed)
             digest = packet.payload.get("hash_digest")

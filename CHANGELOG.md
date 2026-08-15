@@ -5,6 +5,120 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Phase 13: Peer Authentication and Full main.py Wiring
+- `domain/identity.py` (new): `IdentityKeyPair`, `IdentityProvider`
+  (load/create a persistent identity, sign, verify), and
+  `TrustedPeerRepository` (pin/check a peer's long-term public key).
+  `domain/identity_exceptions.py` (new): `IdentityError`,
+  `InvalidHandshakeSignatureError`, `PeerIdentityMismatchError`.
+- `infrastructure/crypto/ed25519_identity_provider.py` (new):
+  `Ed25519IdentityProvider` — persists a device's Ed25519 identity as
+  two files (`identity.private`, restricted to `0o600` where
+  supported; `identity.public`), generated once, reloaded thereafter.
+  Verified: persistence across instances, valid/tampered/wrong-key
+  signature verification.
+- `infrastructure/networking/file_trusted_peer_repository.py` (new):
+  `FileTrustedPeerRepository` — atomically-written JSON trust store.
+  Verified: unknown-peer lookup, pin-and-retrieve, persistence across
+  instances, independent multi-peer entries.
+- `infrastructure/networking/x25519_handshake.py`: every handshake
+  message is now signed with the sender's persistent Ed25519 identity
+  and verified against `TrustedPeerRepository` (trust-on-first-use).
+  Verified end to end: a genuine repeat handshake with the same
+  identity succeeds; an impostor presenting a *different* identity for
+  an already-trusted `device_id` is rejected (`HandshakeServer`
+  publishes no result for it). See ADR-0019.
+- `infrastructure/networking/session_key_store.py` (new):
+  `SessionKeyStore` (`device_id -> PeerSession`) and `PeerSession`
+  (`send_key`, `receive_key`, `transfer_port`) — replaces
+  `TcpTransferTransport`'s single fixed key pair, so a device can hold
+  independently-keyed sessions with multiple peers simultaneously.
+- `infrastructure/networking/x25519_handshake.py`: `X25519Handshake`
+  now exchanges each side's chunk-transfer port as part of the signed
+  handshake payload (`HandshakeResult.peer_transfer_port`) rather than
+  guessing it from a port-offset convention. Verified: a handshake
+  between instances on non-adjacent ports correctly taught each side
+  the other's real transfer port, and `TcpTransferTransport.send_chunk`
+  connected to that negotiated port.
+- `infrastructure/networking/tcp_transport.py`: refactored from fixed
+  `send_key`/`receive_key` constructor parameters to a `SessionKeyStore`
+  looked up per call by `peer.device_id` — no wire-format change needed,
+  since `send_chunk`/`request_chunks` already took `peer` as a parameter.
+- `domain/handshake.py` (new): `SessionCoordinator` port, so
+  `SyncOrchestrator` (application layer) can depend on "ensure a
+  session exists for this peer" without depending on
+  `X25519Handshake` (infrastructure) directly.
+  `infrastructure/networking/x25519_session_coordinator.py` (new):
+  `X25519SessionCoordinator`, the concrete adapter.
+- `application/orchestration.py`: `SyncOrchestrator` gained an
+  optional `session_coordinator` parameter; `handle_peer_discovered`
+  calls `ensure_session` for newly discovered peers, catching and
+  logging any failure (counted in `stats.errors_encountered`) so one
+  peer's failed handshake doesn't stop discovery of others. Verified:
+  3 new tests covering the call, graceful failure, and the no-coordinator
+  default.
+- `main.py`: fully wired — real `Ed25519IdentityProvider`,
+  `FileTrustedPeerRepository`, `X25519Handshake` (both initiator via
+  `X25519SessionCoordinator` and responder via `HandshakeServer`, with
+  a new `_drain_inbound_handshakes` background task feeding inbound
+  results into the same `SessionKeyStore`), and `TcpTransferTransport`.
+  `download_use_case`/`upload_use_case` are no longer `None`. Verified
+  by actually running `bootstrap()` in this session (with `zeroconf`/
+  `aiosqlite` stood in for, since neither is installed in this
+  sandbox) through `orchestrator.start()` binding real handshake and
+  transfer ports successfully.
+- `domain/config.py`: added `NetworkConfig.transfer_port` (default
+  `8082`); `config.network.port` (already advertised via mDNS) is
+  reused as the handshake port rather than adding a third port field.
+- `tests/doubles.py`: added `FakeIdentityProvider` and
+  `FakeTrustedPeerRepository` for the new `domain/identity.py` ports,
+  per `CONTRIBUTING.md`'s every-new-port-needs-a-fake rule.
+- `docs/adr/0019-peer-authentication-and-trust-on-first-use.md` and
+  `docs/adr/0020-multi-peer-session-keys-and-main-py-wiring.md`:
+  full account of both decisions, what was verified, and the
+  trade-offs accepted (TOFU's first-contact weakness, no key-rotation
+  recovery path, `InProcessTransferTransport` intentionally not
+  refactored to the same session-key model since it's a test-only
+  component).
+- `ROADMAP.md`: added a **Phase 13** entry; Phase 12's two originally
+  disclosed follow-ups (peer authentication, `main.py` wiring) are now
+  both marked resolved there.
+
+### Added — Phase 12: Key Exchange Handshake
+- `infrastructure/networking/x25519_handshake.py` (new):
+  `X25519Handshake` (initiator/responder halves of a real X25519
+  exchange over TCP) and `HandshakeServer` (accepts inbound
+  handshakes, publishes results to a queue). Resolves the exact
+  ambiguity `PycaSessionKeyProvider.derive_session_keys`'s docstring
+  flagged: initiator and responder deterministically get
+  complementary `(send_key, receive_key)` pairs by role convention
+  (initiator: `(key_1, key_2)`; responder: swapped `(key_2, key_1)`).
+  Verified over a real socket: `initiator.send_key == responder.receive_key`
+  and `initiator.receive_key == responder.send_key` both hold, the two
+  keys are confirmed distinct, and repeated handshakes produce
+  different keys every time (fresh ephemeral keypair + salt each
+  time).
+- `infrastructure/networking/in_process_transport.py` and
+  `infrastructure/networking/tcp_transport.py`: refactored from a
+  single shared `key: bytes` to separate `send_key`/`receive_key`
+  parameters, matching what a real handshake actually produces.
+  Breaking change to code added earlier in this same integration
+  effort (ADR-0016/0017), not to any previously-stabilized phase.
+- Full chain verified end to end, no hardcoded key anywhere: a real
+  `X25519Handshake` negotiates keys over a real socket, those exact
+  keys construct two `TcpTransferTransport` instances, and a chunk
+  uploads and downloads correctly through the unmodified
+  `UploadChunksUseCase`/`DownloadChunksUseCase`.
+- 4 new tests in `test_x25519_handshake.py`; `test_in_process_transport.py`
+  and `test_tcp_transport.py` updated for the new constructor
+  signature (12 tests total across the three files, all passing).
+- `docs/adr/0018-key-exchange-handshake.md`: the role-swap resolution,
+  what was verified, and the two things this handshake still doesn't
+  do — peer authentication, and wiring into `main.py` — disclosed
+  explicitly rather than silently deferred.
+- `ROADMAP.md`: added a **Phase 12** entry, checked, with both
+  disclosed follow-ups named.
+
 ### Added — Phase 11: Real Network Transport (partial — not yet wired into main.py)
 - `infrastructure/networking/tcp_transport.py` (new): `TcpTransferTransport` —
   a real `TransferTransport` implementation over `asyncio` TCP

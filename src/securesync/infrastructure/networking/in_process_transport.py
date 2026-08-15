@@ -78,7 +78,8 @@ class InProcessTransferTransport(TransferTransport):
         own_device_id: str,
         network: InProcessNetwork,
         cipher: AeadCipher,
-        key: bytes,
+        send_key: bytes,
+        receive_key: bytes,
     ) -> None:
         """Initialize the transport.
 
@@ -86,12 +87,17 @@ class InProcessTransferTransport(TransferTransport):
             own_device_id: This device's ID — the inbox `request_chunks` reads from.
             network: The shared network this transport sends and receives through.
             cipher: The AEAD cipher used to encrypt and decrypt every message.
-            key: The shared symmetric key `cipher` encrypts and decrypts with.
+            send_key: Key used to encrypt outgoing chunks in `send_chunk`.
+            receive_key: Key used to decrypt incoming chunks in
+                `request_chunks`. Must differ from `send_key` — see
+                ``docs/adr/0018-key-exchange-handshake.md`` for why a
+                single shared key was replaced with a directional pair.
         """
         self._own_device_id = own_device_id
         self._network = network
         self._cipher = cipher
-        self._key = key
+        self._send_key = send_key
+        self._receive_key = receive_key
         self._message_id = 0
 
     def _next_message_id(self) -> int:
@@ -124,7 +130,7 @@ class InProcessTransferTransport(TransferTransport):
 
         nonce = os.urandom(NONCE_SIZE)
         encrypted = self._cipher.encrypt(
-            framed, self._key, nonce, associated_data=peer.device_id.encode("utf-8")
+            framed, self._send_key, nonce, associated_data=peer.device_id.encode("utf-8")
         )
         await self._network.inbox_for(peer.device_id).put(self._pack_envelope(encrypted))
         logger.info("chunk_sent", peer=peer.device_id, chunk_id=chunk.metadata.chunk_id)
@@ -153,7 +159,7 @@ class InProcessTransferTransport(TransferTransport):
             envelope = await inbox.get()
             encrypted = self._unpack_envelope(envelope)
             framed = self._cipher.decrypt(
-                encrypted, self._key, associated_data=self._own_device_id.encode("utf-8")
+                encrypted, self._receive_key, associated_data=self._own_device_id.encode("utf-8")
             )
             packet = Packet.decode(framed)
             digest = packet.payload.get("hash_digest")

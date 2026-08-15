@@ -145,3 +145,53 @@ async def test_stop_returns_promptly_without_waiting_out_the_poll_interval() -> 
     elapsed = time.monotonic() - start_time
 
     assert elapsed < 1.0
+
+
+@pytest.mark.asyncio
+async def test_handle_peer_discovered_establishes_a_session_when_coordinator_is_set() -> None:
+    """A configured session_coordinator is asked to establish a session for new peers."""
+    session_coordinator = AsyncMock()
+    orchestrator = SyncOrchestrator(
+        metadata_repo=AsyncMock(),
+        discovery_use_case=AsyncMock(),
+        conflict_use_case=AsyncMock(),
+        session_coordinator=session_coordinator,
+    )
+    peer = _peer()
+
+    await orchestrator.start()
+    await orchestrator.handle_peer_discovered(peer)
+
+    session_coordinator.ensure_session.assert_awaited_once_with(peer)
+    await orchestrator.stop()
+
+
+@pytest.mark.asyncio
+async def test_handle_peer_discovered_survives_a_failed_session_establishment() -> None:
+    """A handshake failure for one peer must not crash discovery of others."""
+    session_coordinator = AsyncMock()
+    session_coordinator.ensure_session.side_effect = OSError("connection refused")
+    orchestrator = SyncOrchestrator(
+        metadata_repo=AsyncMock(),
+        discovery_use_case=AsyncMock(),
+        conflict_use_case=AsyncMock(),
+        session_coordinator=session_coordinator,
+    )
+
+    await orchestrator.start()
+    await orchestrator.handle_peer_discovered(_peer())
+
+    assert orchestrator.stats.errors_encountered == 1
+    assert orchestrator.state == SyncState.SYNCING
+    await orchestrator.stop()
+
+
+@pytest.mark.asyncio
+async def test_handle_peer_discovered_works_without_a_session_coordinator() -> None:
+    """No session_coordinator configured (the default) must not raise."""
+    orchestrator = _orchestrator()
+
+    await orchestrator.start()
+    await orchestrator.handle_peer_discovered(_peer())  # should not raise
+
+    await orchestrator.stop()

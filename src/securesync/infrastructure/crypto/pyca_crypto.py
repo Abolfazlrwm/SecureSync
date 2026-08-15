@@ -58,16 +58,16 @@ class PycaSessionKeyProvider(SessionKeyProvider):
         Returns:
             A ``(send_key, receive_key)`` tuple of 32-byte AEAD keys.
 
-        Warning:
-            Two peers deriving keys from the *same* ``shared_secret``
-            and ``salt`` get the identical ``(send_key, receive_key)``
-            pair — peer A's ``send_key`` would equal peer B's
-            ``send_key``, not peer B's ``receive_key``. No caller in
-            this codebase currently invokes this method; whichever
-            handshake code does must swap the pair for one side (e.g.
-            by role: the initiator uses the pair as returned, the
-            responder swaps it) or bind role into ``salt``/``info``,
-            or peers will never actually decrypt each other's traffic.
+        Note:
+            The two values returned here are not yet a directional
+            ``(send_key, receive_key)`` pair — two peers with the same
+            ``shared_secret``/``salt`` get the identical pair back.
+            :class:`~securesync.infrastructure.networking.x25519_handshake.X25519Handshake`
+            is what turns this into a real per-direction pair: it
+            calls this method once per side and swaps the pair for
+            whichever side is the responder, so each side's send key
+            equals the other's receive key. Don't call this method
+            directly and treat its output as already-directional.
         """
         hkdf = HKDF(
             algorithm=hashes.SHA256(),

@@ -22,6 +22,9 @@ gets a new ADR that says so and links back, rather than editing history).
 | [0015](0015-production-runtime-and-configuration.md) | Production Runtime and Configuration | Accepted |
 | [0016](0016-in-process-encrypted-transport.md) | Real Use-Case Wiring, an In-Process Encrypted Transport, and the Disclosed Socket-Transport Gap | Accepted |
 | [0017](0017-tcp-transfer-transport.md) | A Real TCP Transport — and Why It Still Isn't Wired Into `main.py` | Accepted |
+| [0018](0018-key-exchange-handshake.md) | A Real X25519 Key-Exchange Handshake | Accepted |
+| [0019](0019-peer-authentication-and-trust-on-first-use.md) | Peer Authentication and Trust-on-First-Use | Accepted |
+| [0020](0020-multi-peer-session-keys-and-main-py-wiring.md) | Multi-Peer Session Keys and Full `main.py` Wiring | Accepted |
 
 ## Template for new ADRs
 

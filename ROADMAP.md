@@ -131,6 +131,25 @@ Status is updated at the end of every phase alongside `CHANGELOG.md`.
       multi-peer transport, `download_use_case`/`upload_use_case` no
       longer `None` — verified by actually running `bootstrap()` in
       this session. See ADR-0020.
+- [x] **Phase 14 — Manifest Exchange Protocol**
+      `ManifestExchangeTransport` (real `TcpManifestExchangeTransport`
+      implementation) lets one peer ask another "what do you have for
+      this file?" — the one piece of information `DeltaCalculator`
+      (Phase 3) needs to compute anything, and the last missing piece
+      for genuine cross-machine sync. Reuses the already-negotiated
+      session keys from the handshake (no separate key exchange) and
+      serves manifests from the same `ChunkRepository`
+      `ComputeDeltaUseCase` already reads baselines from. A third
+      negotiated port (`manifest_port`) is exchanged the same way the
+      transfer port is — as part of the signed handshake payload.
+      Verified end to end: a request for a file the peer has returns
+      its real manifest (chunk hash confirmed matching); a request for
+      a file it doesn't have returns `None`. See ADR-0021. Not yet
+      done: `SyncOrchestrator`'s automatic loop doesn't call this yet
+      — establishing a session with a discovered peer doesn't yet
+      trigger requesting its manifests, computing deltas, or
+      transferring anything as a result. That orchestration loop is
+      the next explicit step.
 
 ## Advanced features (introduced opportunistically, in the phase they fit)
 

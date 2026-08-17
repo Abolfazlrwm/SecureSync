@@ -57,7 +57,7 @@ class FileChunkRepository(ChunkRepository):
         manifest_path = self._manifest_path(collection.source_path)
         try:
             atomic_write_bytes(
-                manifest_path, orjson.dumps(_collection_to_dict(collection)), temp_suffix="manifest"
+                manifest_path, orjson.dumps(collection_to_dict(collection)), temp_suffix="manifest"
             )
         except OSError as exc:
             raise ChunkEngineError(
@@ -81,7 +81,7 @@ class FileChunkRepository(ChunkRepository):
             return None
         try:
             payload = orjson.loads(manifest_path.read_bytes())
-            return _collection_from_dict(payload)
+            return collection_from_dict(payload)
         except (OSError, orjson.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
             raise ChunkEngineError(
                 f"Failed to load chunk manifest for {source_path}: {exc}"
@@ -99,7 +99,14 @@ class FileChunkRepository(ChunkRepository):
         return self._storage_dir / f"{digest}.json"
 
 
-def _collection_to_dict(collection: ChunkCollection) -> dict[str, Any]:
+def collection_to_dict(collection: ChunkCollection) -> dict[str, Any]:
+    """Serialize a `ChunkCollection` to a JSON/msgpack-safe dict.
+
+    Public (not module-private) so
+    :mod:`securesync.infrastructure.networking.tcp_manifest_exchange`
+    can reuse it for network transport instead of duplicating this
+    logic — see ``docs/adr/0021-manifest-exchange-protocol.md``.
+    """
     return {
         "source_path": str(collection.source_path),
         "chunk_size": collection.chunk_size,
@@ -124,7 +131,8 @@ def _metadata_to_dict(metadata: ChunkMetadata) -> dict[str, Any]:
     }
 
 
-def _collection_from_dict(payload: dict[str, Any]) -> ChunkCollection:
+def collection_from_dict(payload: dict[str, Any]) -> ChunkCollection:
+    """Deserialize a `ChunkCollection` from the dict shape `collection_to_dict` produces."""
     chunks_payload = cast(list[dict[str, Any]], payload["chunks"])
     return ChunkCollection(
         source_path=Path(cast(str, payload["source_path"])),

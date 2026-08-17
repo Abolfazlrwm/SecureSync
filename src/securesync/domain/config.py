@@ -23,6 +23,7 @@ class NetworkConfig:
     discovery_enabled: bool = True
     mDNS_service_type: str = "_securesync._tcp.local."
     transfer_port: int = 8082
+    manifest_port: int = 8083
 
 
 @dataclass(frozen=True, slots=True)

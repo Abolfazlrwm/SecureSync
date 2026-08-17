@@ -48,6 +48,7 @@ class X25519SessionCoordinator(SessionCoordinator):
                 send_key=result.send_key,
                 receive_key=result.receive_key,
                 transfer_port=result.peer_transfer_port,
+                manifest_port=result.peer_manifest_port,
             ),
         )
         logger.info("session_established", peer_device_id=result.peer_device_id)

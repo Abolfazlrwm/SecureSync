@@ -54,9 +54,17 @@ class HandshakeResult:
         receive_key: Key to decrypt messages received from this peer.
         peer_transfer_port: The port the peer's chunk-transfer
             transport listens on, exchanged as part of this handshake.
+        peer_manifest_port: The port the peer's manifest-exchange
+            transport listens on, also exchanged as part of this handshake.
     """
 
-    __slots__ = ("peer_device_id", "send_key", "receive_key", "peer_transfer_port")
+    __slots__ = (
+        "peer_device_id",
+        "send_key",
+        "receive_key",
+        "peer_transfer_port",
+        "peer_manifest_port",
+    )
 
     def __init__(
         self,
@@ -64,6 +72,7 @@ class HandshakeResult:
         send_key: bytes,
         receive_key: bytes,
         peer_transfer_port: int,
+        peer_manifest_port: int,
     ) -> None:
         """Initialize the result.
 
@@ -73,11 +82,14 @@ class HandshakeResult:
             receive_key: Key to decrypt messages received from this peer.
             peer_transfer_port: The port the peer's chunk-transfer
                 transport listens on.
+            peer_manifest_port: The port the peer's manifest-exchange
+                transport listens on.
         """
         self.peer_device_id = peer_device_id
         self.send_key = send_key
         self.receive_key = receive_key
         self.peer_transfer_port = peer_transfer_port
+        self.peer_manifest_port = peer_manifest_port
 
 
 class X25519Handshake:
@@ -87,6 +99,7 @@ class X25519Handshake:
         self,
         own_device_id: str,
         own_transfer_port: int,
+        own_manifest_port: int,
         key_exchange: KeyExchangeProvider,
         session_keys: SessionKeyProvider,
         identity_provider: IdentityProvider,
@@ -101,6 +114,8 @@ class X25519Handshake:
             own_transfer_port: This device's chunk-transfer port,
                 sent to the peer so it knows where to reach the
                 resulting `TcpTransferTransport`.
+            own_manifest_port: This device's manifest-exchange port,
+                sent to the peer for the same reason.
             key_exchange: Generates ephemeral keypairs and derives the
                 ECDH shared secret.
             session_keys: Derives the final `(key_1, key_2)` pair from
@@ -113,6 +128,7 @@ class X25519Handshake:
         """
         self._own_device_id = own_device_id
         self._own_transfer_port = own_transfer_port
+        self._own_manifest_port = own_manifest_port
         self._key_exchange = key_exchange
         self._session_keys = session_keys
         self._identity_provider = identity_provider
@@ -148,6 +164,7 @@ class X25519Handshake:
                 {
                     "device_id": self._own_device_id,
                     "transfer_port": self._own_transfer_port,
+                    "manifest_port": self._own_manifest_port,
                     "salt": salt,
                     "public_key": public_key,
                     "identity_public_key": self._own_identity.public_key,
@@ -174,6 +191,7 @@ class X25519Handshake:
             send_key=key_1,
             receive_key=key_2,
             peer_transfer_port=response["transfer_port"],
+            peer_manifest_port=response["manifest_port"],
         )
 
     async def accept(
@@ -207,6 +225,7 @@ class X25519Handshake:
             {
                 "device_id": self._own_device_id,
                 "transfer_port": self._own_transfer_port,
+                "manifest_port": self._own_manifest_port,
                 "public_key": public_key,
                 "identity_public_key": self._own_identity.public_key,
                 "signature": signature,
@@ -225,6 +244,7 @@ class X25519Handshake:
             send_key=key_2,
             receive_key=key_1,
             peer_transfer_port=request["transfer_port"],
+            peer_manifest_port=request["manifest_port"],
         )
 
     async def _verify_and_trust(self, message: dict[str, Any], signed_data: bytes) -> None:

@@ -29,6 +29,8 @@ from securesync.domain.chunking import (
 )
 from securesync.domain.events import FileSystemEvent
 from securesync.domain.identity import IdentityKeyPair, IdentityProvider, TrustedPeerRepository
+from securesync.domain.manifest_exchange import ManifestExchangeTransport
+from securesync.domain.networking import Peer
 from securesync.domain.watcher import FileSystemEventObserver, FileWatcher
 
 
@@ -315,3 +317,19 @@ class FakeTrustedPeerRepository(TrustedPeerRepository):
     async def trust(self, device_id: str, public_key: bytes) -> None:
         """Pin `public_key` as trusted for `device_id`."""
         self._store[device_id] = public_key
+
+
+class FakeManifestExchangeTransport(ManifestExchangeTransport):
+    """In-memory fake ``ManifestExchangeTransport`` — no sockets, no encryption.
+
+    Seed it with ``manifests[(device_id, source_path)] = collection``
+    to control what a "peer" appears to have.
+    """
+
+    def __init__(self) -> None:
+        """Initialize with an empty manifest map."""
+        self.manifests: dict[tuple[str, str], ChunkCollection] = {}
+
+    async def request_manifest(self, peer: Peer, source_path: str) -> ChunkCollection | None:
+        """Return the seeded manifest for `(peer.device_id, source_path)`, if any."""
+        return self.manifests.get((peer.device_id, source_path))

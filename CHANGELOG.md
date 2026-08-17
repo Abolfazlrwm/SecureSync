@@ -5,6 +5,46 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Phase 14: Manifest Exchange Protocol
+- `domain/manifest_exchange.py` (new): `ManifestExchangeTransport`
+  port — `request_manifest(peer, source_path) -> ChunkCollection | None`.
+- `infrastructure/networking/tcp_manifest_exchange.py` (new):
+  `TcpManifestExchangeTransport` — a real request/response
+  implementation over TCP (one connection: write a request, read a
+  response, close — structurally like `X25519Handshake`, not
+  `TcpTransferTransport`'s push-to-inbox model, since a manifest
+  lookup needs an answer on the same connection). Reuses the
+  already-negotiated `PeerSession` keys from the handshake and serves
+  manifests from the same `ChunkRepository`
+  `ComputeDeltaUseCase` already reads baselines from.
+- `infrastructure/chunking/file_chunk_repository.py`: `_collection_to_dict`/
+  `_collection_from_dict` made public (`collection_to_dict`/
+  `collection_from_dict`) so the network transport reuses the same
+  serialization logic as disk persistence instead of duplicating it.
+- `infrastructure/networking/x25519_handshake.py`,
+  `infrastructure/networking/session_key_store.py`: `HandshakeResult`/
+  `PeerSession` gained `peer_manifest_port`/`manifest_port`, exchanged
+  as part of the signed handshake payload the same way
+  `transfer_port` already was (ADR-0020's reasoning applied again).
+- `domain/config.py`: added `NetworkConfig.manifest_port` (default `8083`).
+- `main.py`: starts and stops `TcpManifestExchangeTransport` alongside
+  the chunk-transfer transport. Verified by running `bootstrap()`
+  through `orchestrator.start()` successfully.
+- Verified end to end: a handshake between two instances correctly
+  exchanges the real manifest port; a manifest request for a file the
+  peer has returns its real `ChunkCollection` (chunk hash confirmed
+  matching); a request for a file it doesn't have returns `None`.
+- 3 new tests in `test_tcp_manifest_exchange.py`, all running against
+  real sockets. `tests/doubles.py`: added `FakeManifestExchangeTransport`
+  per `CONTRIBUTING.md`'s every-new-port-needs-a-fake rule.
+- `docs/adr/0021-manifest-exchange-protocol.md`: full rationale, and
+  the explicitly disclosed remaining gap — `SyncOrchestrator`'s
+  automatic loop doesn't call this yet, so discovering a peer
+  establishes a session but doesn't request manifests, compute deltas,
+  or transfer anything as a result.
+- `ROADMAP.md`: added a **Phase 14** entry naming that orchestration
+  loop as the next explicit step.
+
 ### Added — Phase 13: Peer Authentication and Full main.py Wiring
 - `domain/identity.py` (new): `IdentityKeyPair`, `IdentityProvider`
   (load/create a persistent identity, sign, verify), and

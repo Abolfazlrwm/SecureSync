@@ -17,6 +17,7 @@ from securesync.application.use_cases.transfer_chunks import (
     DownloadChunksUseCase,
     UploadChunksUseCase,
 )
+from securesync.infrastructure.chunking.file_chunk_repository import FileChunkRepository
 from securesync.infrastructure.config.yaml_config_loader import YamlConfigLoader
 from securesync.infrastructure.crypto.ed25519_identity_provider import Ed25519IdentityProvider
 from securesync.infrastructure.crypto.pyca_crypto import (
@@ -34,6 +35,9 @@ from securesync.infrastructure.networking.in_memory_conflict_repository import (
 from securesync.infrastructure.networking.in_memory_peer_repository import InMemoryPeerRepository
 from securesync.infrastructure.networking.mdns_discovery import MdnsDiscoveryService
 from securesync.infrastructure.networking.session_key_store import PeerSession, SessionKeyStore
+from securesync.infrastructure.networking.tcp_manifest_exchange import (
+    TcpManifestExchangeTransport,
+)
 from securesync.infrastructure.networking.tcp_transport import TcpTransferTransport
 from securesync.infrastructure.networking.x25519_handshake import HandshakeServer, X25519Handshake
 from securesync.infrastructure.networking.x25519_session_coordinator import (
@@ -64,6 +68,7 @@ async def _drain_inbound_handshakes(
                 send_key=result.send_key,
                 receive_key=result.receive_key,
                 transfer_port=result.peer_transfer_port,
+                manifest_port=result.peer_manifest_port,
             ),
         )
 
@@ -113,6 +118,7 @@ async def bootstrap(config_path: str) -> None:
     handshake = X25519Handshake(
         device_id,
         config.network.transfer_port,
+        config.network.manifest_port,
         key_exchange,
         session_key_provider,
         identity_provider,
@@ -131,6 +137,20 @@ async def bootstrap(config_path: str) -> None:
     await transport.start()
     download_use_case = DownloadChunksUseCase(transport)
     upload_use_case = UploadChunksUseCase(transport)
+
+    # The local chunk manifests peers request are the same store
+    # ComputeDeltaUseCase already reads baselines from (ADR-0010: this
+    # repository already is SecureSync's persistent manifest store).
+    chunk_repository = FileChunkRepository(storage_dir=storage_dir / "chunks")
+    manifest_exchange = TcpManifestExchangeTransport(
+        device_id,
+        _LISTEN_HOST,
+        config.network.manifest_port,
+        cipher,
+        session_keys,
+        chunk_repository,
+    )
+    await manifest_exchange.start()
 
     orchestrator = SyncOrchestrator(
         metadata_repo=metadata_repo,
@@ -154,6 +174,7 @@ async def bootstrap(config_path: str) -> None:
         drain_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await drain_task
+        await manifest_exchange.stop()
         await transport.stop()
         await handshake_server.stop()
         await metadata_repo.close()

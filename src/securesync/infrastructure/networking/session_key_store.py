@@ -21,7 +21,7 @@ class NoSessionKeyError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class PeerSession:
-    """One peer's negotiated keys and chunk-transfer port.
+    """One peer's negotiated keys and ports.
 
     Attributes:
         send_key: Key to encrypt messages sent to this peer.
@@ -29,11 +29,14 @@ class PeerSession:
         transfer_port: The port this peer's `TcpTransferTransport`
             listens on for chunk transfer, learned from the handshake
             (not the same as the handshake port itself).
+        manifest_port: The port this peer's manifest-exchange
+            transport listens on, also learned from the handshake.
     """
 
     send_key: bytes
     receive_key: bytes
     transfer_port: int
+    manifest_port: int
 
 
 class SessionKeyStore:

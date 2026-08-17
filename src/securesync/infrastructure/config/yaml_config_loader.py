@@ -40,6 +40,7 @@ class YamlConfigLoader:
             discovery_enabled=network_data.get("discovery_enabled", True),
             mDNS_service_type=network_data.get("mDNS_service_type", "_securesync._tcp.local."),
             transfer_port=network_data.get("transfer_port", 8082),
+            manifest_port=network_data.get("manifest_port", 8083),
         )
 
         return Configuration(

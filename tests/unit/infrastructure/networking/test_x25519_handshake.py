@@ -28,6 +28,8 @@ def _handshake(device_id: str, storage_dir: Path) -> X25519Handshake:
     trusted_peers = FileTrustedPeerRepository(storage_dir / "trust.json")
     return X25519Handshake(
         device_id,
+        9999,  # dummy transfer_port — not exercised by these handshake-only tests
+        9998,  # dummy manifest_port — not exercised by these handshake-only tests
         PycaKeyExchangeProvider(),
         PycaSessionKeyProvider(),
         identity_provider,

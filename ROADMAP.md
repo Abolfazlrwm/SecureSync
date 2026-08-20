@@ -150,6 +150,35 @@ Status is updated at the end of every phase alongside `CHANGELOG.md`.
       trigger requesting its manifests, computing deltas, or
       transferring anything as a result. That orchestration loop is
       the next explicit step.
+- [x] **Phase 15 — File Synchronization Use Case**
+      `SyncFileUseCase.push`/`.pull` compose manifest exchange + delta
+      computation + transfer into the first real "synchronize this
+      file" operation. Building and verifying it against two real
+      peer processes surfaced and fixed three genuine bugs: syncing a
+      file that doesn't exist locally yet used to crash; an absolute
+      local path can't identify a file across two machines with
+      different filesystem layouts (fixed — every cross-peer
+      reference is now relative to each side's own sync root); and a
+      first automatic-bidirectional version silently overwrote a
+      fresh local edit with a peer's stale copy of the same chunk
+      (fixed by making `push`/`pull` separate, explicit-direction
+      methods instead of one method that reconciles both ways —
+      removing the ambiguity, not patching around it). Also required
+      a genuine chunk-data *pull* (`ManifestExchangeTransport.request_chunks`)
+      since `TransferTransport.request_chunks`'s "no real
+      request/response round trip" limitation (disclosed back in
+      ADR-0017/0018) turned out to hang forever the first time a real
+      caller actually needed a pull. New `FileReconstructor` port
+      writes downloaded chunks at their correct offset within the
+      reconstructed file (deliberately not Phase 2's `ChunkWriter`,
+      which writes a chunk as its own standalone file — the wrong
+      shape for this). Verified end to end: fresh push, fresh pull, an
+      incremental edit pushed and pulled (only the changed chunk
+      transferred each way), and a final no-op push — file contents
+      matched byte-for-byte throughout. See ADR-0022. Not yet done:
+      deciding *which* direction is correct for a given file — real
+      conflict detection wired to this path — is still the caller's
+      job; `SyncOrchestrator` still doesn't call this automatically.
 
 ## Advanced features (introduced opportunistically, in the phase they fit)
 

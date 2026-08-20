@@ -5,6 +5,73 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Phase 15: File Synchronization Use Case
+- `application/use_cases/sync_file.py` (new): `SyncFileUseCase` with
+  explicit `push`/`pull` methods (deliberately not one automatic
+  bidirectional method — see below). Composes manifest exchange,
+  `DeltaCalculator`, upload, and chunk pull into the first real
+  "synchronize this file" operation.
+- Three real bugs found and fixed while verifying this against two
+  real peer processes (not found by inspection — each reproduced with
+  an actual two-device test scenario):
+  - Syncing a file that doesn't exist locally yet (the normal "first
+    pull" case) crashed with `ChunkSourceNotFoundError`. Fixed:
+    treated as an empty local manifest, not an error.
+  - `ManifestExchangeTransport` originally identified files by
+    absolute path — invisible across two peers whose sync
+    directories live at different absolute locations. Fixed: every
+    cross-peer file reference (`request_manifest`, the new
+    `request_chunks`, `SyncFileUseCase`'s own parameters) now uses a
+    path relative to each side's own sync root.
+    `TcpManifestExchangeTransport` gained a `sync_root` constructor
+    parameter to resolve a peer's relative request back to this
+    device's own absolute path.
+  - An automatic-bidirectional first version of this use case
+    silently overwrote a device's own fresh edit with a peer's stale
+    copy of the same chunk — verified with an actual round-trip test
+    that ended in mismatched file contents. Root cause: without a
+    timestamp or version signal, a pure content-hash diff can't tell
+    "new content the peer needs" apart from "stale content the peer
+    has already moved past." Fixed by making `push` and `pull`
+    separate, explicit-direction methods instead of attempting
+    automatic reconciliation — removing the ambiguity rather than
+    patching around it (a heuristic guard was tried first and found
+    insufficient — the same ambiguity corrupted the upload decision
+    too, not just download).
+- `domain/manifest_exchange.py`, `infrastructure/networking/tcp_manifest_exchange.py`:
+  added a genuine `request_chunks(peer, relative_path, chunk_hashes)`
+  pull — the requester actively asks, the responder reads the exact
+  requested byte ranges from its own file and answers on the same
+  connection. Needed because `TransferTransport.request_chunks`'s
+  disclosed "no real request/response round trip" limitation
+  (ADR-0017/0018) turned out to hang forever the first time a real
+  caller (this use case) actually needed a pull.
+- `domain/reconstruction.py`, `infrastructure/chunking/local_file_reconstructor.py`
+  (new): `FileReconstructor` port + `LocalFileReconstructor` —
+  writes a downloaded chunk's bytes at its correct offset within the
+  file being reconstructed. Deliberately not Phase 2's `ChunkWriter`,
+  which writes a chunk as its own standalone file. Verified:
+  out-of-order chunk writes reassemble correctly; overwriting one
+  chunk doesn't disturb others already written.
+- `infrastructure/chunking/file_chunk_repository.py`: no changes
+  needed beyond Phase 14's public `collection_to_dict`/`collection_from_dict`
+  — reused again here for the chunk-response payload shape.
+- Verified end to end across a full scenario: fresh push, fresh pull,
+  an incremental edit pushed and pulled (only the changed chunk
+  transferred each way, confirmed by count), and a final no-op push
+  (zero chunks) — file contents matched byte-for-byte throughout.
+- 10 new tests: `test_sync_file.py` (6, using new `FakeTransferTransport`
+  and extended `FakeManifestExchangeTransport` doubles),
+  `test_local_file_reconstructor.py` (4). `test_tcp_manifest_exchange.py`
+  extended with 2 `request_chunks` tests (7 total).
+- `docs/adr/0022-file-synchronization-use-case.md`: full account of
+  all three bugs, why automatic bidirectional sync was rejected in
+  favor of explicit push/pull, and what's still left to
+  `SyncOrchestrator`'s automatic loop (deciding which direction is
+  correct for a given file — real conflict detection, not addressed
+  here).
+- `ROADMAP.md`: added a **Phase 15** entry.
+
 ### Added — Phase 14: Manifest Exchange Protocol
 - `domain/manifest_exchange.py` (new): `ManifestExchangeTransport`
   port — `request_manifest(peer, source_path) -> ChunkCollection | None`.

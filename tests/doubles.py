@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from collections.abc import Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
 
 from securesync.domain.chunk import Chunk, ChunkAlgorithm, ChunkCollection, ChunkHash
@@ -31,6 +31,7 @@ from securesync.domain.events import FileSystemEvent
 from securesync.domain.identity import IdentityKeyPair, IdentityProvider, TrustedPeerRepository
 from securesync.domain.manifest_exchange import ManifestExchangeTransport
 from securesync.domain.networking import Peer
+from securesync.domain.transfer import TransferTransport
 from securesync.domain.watcher import FileSystemEventObserver, FileWatcher
 
 
@@ -322,14 +323,51 @@ class FakeTrustedPeerRepository(TrustedPeerRepository):
 class FakeManifestExchangeTransport(ManifestExchangeTransport):
     """In-memory fake ``ManifestExchangeTransport`` — no sockets, no encryption.
 
-    Seed it with ``manifests[(device_id, source_path)] = collection``
-    to control what a "peer" appears to have.
+    Seed it with ``manifests[(device_id, relative_path)] = collection``
+    to control what a "peer" appears to have, and
+    ``chunks[(device_id, relative_path)] = [chunk, ...]`` to control
+    what ``request_chunks`` can actually hand back.
     """
 
     def __init__(self) -> None:
-        """Initialize with an empty manifest map."""
+        """Initialize with empty manifest and chunk maps."""
         self.manifests: dict[tuple[str, str], ChunkCollection] = {}
+        self.chunks: dict[tuple[str, str], list[Chunk]] = {}
 
-    async def request_manifest(self, peer: Peer, source_path: str) -> ChunkCollection | None:
-        """Return the seeded manifest for `(peer.device_id, source_path)`, if any."""
-        return self.manifests.get((peer.device_id, source_path))
+    async def request_manifest(self, peer: Peer, relative_path: str) -> ChunkCollection | None:
+        """Return the seeded manifest for `(peer.device_id, relative_path)`, if any."""
+        return self.manifests.get((peer.device_id, relative_path))
+
+    async def request_chunks(
+        self, peer: Peer, relative_path: str, chunk_hashes: list[str]
+    ) -> AsyncIterator[Chunk]:
+        """Yield the seeded chunks for `(peer.device_id, relative_path)` matching `chunk_hashes`."""
+        for chunk in self.chunks.get((peer.device_id, relative_path), []):
+            chunk_hash = chunk.metadata.chunk_hash
+            if chunk_hash is not None and chunk_hash.digest in chunk_hashes:
+                yield chunk
+
+
+class FakeTransferTransport(TransferTransport):
+    """In-memory fake ``TransferTransport`` — no sockets, no encryption.
+
+    ``sent`` records every ``send_chunk`` call as ``(peer.device_id, chunk)``
+    for assertions. Seed ``inbox[device_id]`` with chunks for
+    ``request_chunks`` to yield back (matching by hash).
+    """
+
+    def __init__(self) -> None:
+        """Initialize with no recorded sends and an empty inbox."""
+        self.sent: list[tuple[str, Chunk]] = []
+        self.inbox: dict[str, list[Chunk]] = {}
+
+    async def send_chunk(self, peer: Peer, chunk: Chunk) -> None:
+        """Record the send for later assertions."""
+        self.sent.append((peer.device_id, chunk))
+
+    async def request_chunks(self, peer: Peer, chunk_hashes: list[str]) -> AsyncIterator[Chunk]:
+        """Yield chunks from ``inbox[peer.device_id]`` matching ``chunk_hashes``."""
+        for chunk in self.inbox.get(peer.device_id, []):
+            chunk_hash = chunk.metadata.chunk_hash
+            if chunk_hash is not None and chunk_hash.digest in chunk_hashes:
+                yield chunk

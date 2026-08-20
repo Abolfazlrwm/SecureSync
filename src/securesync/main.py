@@ -149,6 +149,7 @@ async def bootstrap(config_path: str) -> None:
         cipher,
         session_keys,
         chunk_repository,
+        Path(config.storage.sync_directory),
     )
     await manifest_exchange.start()
 

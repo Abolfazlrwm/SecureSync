@@ -18,7 +18,7 @@ from securesync.application.use_cases.transfer_chunks import (
 )
 from securesync.domain.chunking import ChunkingStrategy
 from securesync.domain.handshake import SessionCoordinator
-from securesync.domain.metadata import MetadataRepository
+from securesync.domain.metadata import FileMetadata, MetadataRepository
 from securesync.domain.networking import Peer
 
 logger = structlog.get_logger()
@@ -222,15 +222,19 @@ class SyncOrchestrator:
         """React to a new peer being discovered.
 
         Marks the peer active, establishes an encrypted session with
-        it (if a `session_coordinator` is configured), and refreshes
-        the count of locally known files against :attr:`_metadata_repo`.
-        Actually exchanging manifests and chunks with ``peer`` still
-        requires a remote-manifest RPC this codebase doesn't implement
-        yet — see ``docs/adr/0020-multi-peer-session-keys-and-main-py-wiring.md``;
-        when that lands, this is the method that will call
-        :attr:`_conflict_use_case` per file and then
-        :attr:`_download_use_case`/:attr:`_upload_use_case` for
-        whatever :class:`~securesync.domain.delta.DeltaPlan` results.
+        it (if a `session_coordinator` is configured), then — if a
+        `sync_file_use_case` is configured — pushes every locally
+        known, non-deleted file to `peer` (see
+        ``docs/adr/0023-automatic-push-on-peer-discovery.md``).
+
+        This is a one-way push, never a pull: real conflict
+        resolution (deciding which side's version should win) is
+        `_conflict_use_case`'s job and isn't wired into this path yet
+        — see ``docs/adr/0020-multi-peer-session-keys-and-main-py-wiring.md``.
+        `SyncFileUseCase.push` is idempotent on its own (it diffs
+        against the peer's manifest and only sends chunks the peer
+        is actually missing), so a peer that's already fully synced
+        costs nothing here.
 
         Args:
             peer: The newly discovered, online peer.
@@ -257,5 +261,55 @@ class SyncOrchestrator:
                 reason="no TransferTransport configured",
             )
 
+        await self._auto_push_known_files(peer, local_files)
+
         if self._state == SyncState.SCANNING:
             self._state = SyncState.SYNCING
+
+    async def _auto_push_known_files(self, peer: Peer, local_files: list[FileMetadata]) -> None:
+        """Push each non-deleted file in `local_files` to `peer`, best-effort.
+
+        One file failing (e.g. it was deleted from disk after
+        `_metadata_repo` last recorded it) is logged and skipped
+        rather than aborting the rest of the batch.
+        """
+        if self._sync_file_use_case is None:
+            return
+
+        if self._sync_root is None or self._chunking_strategy is None or self._chunk_size is None:
+            logger.warning(
+                "auto_push_misconfigured",
+                device_id=peer.device_id,
+                reason="sync_file_use_case requires sync_root, chunking_strategy, and chunk_size",
+            )
+            return
+
+        for file_metadata in local_files:
+            if file_metadata.is_deleted:
+                continue
+
+            try:
+                result = await self._sync_file_use_case.push(
+                    peer,
+                    self._sync_root,
+                    file_metadata.file_path,
+                    self._chunking_strategy,
+                    chunk_size=self._chunk_size,
+                )
+            except Exception as e:
+                self._stats.errors_encountered += 1
+                logger.warning(
+                    "auto_push_failed",
+                    device_id=peer.device_id,
+                    file_path=file_metadata.file_path,
+                    error=str(e),
+                )
+                continue
+
+            if result.transferred_count:
+                logger.info(
+                    "auto_push_succeeded",
+                    device_id=peer.device_id,
+                    file_path=file_metadata.file_path,
+                    chunks_transferred=result.transferred_count,
+                )

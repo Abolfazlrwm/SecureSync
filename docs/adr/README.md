@@ -27,6 +27,7 @@ gets a new ADR that says so and links back, rather than editing history).
 | [0020](0020-multi-peer-session-keys-and-main-py-wiring.md) | Multi-Peer Session Keys and Full `main.py` Wiring | Accepted |
 | [0021](0021-manifest-exchange-protocol.md) | A Real Manifest Exchange Protocol | Accepted |
 | [0022](0022-file-synchronization-use-case.md) | File Synchronization — Explicit Push/Pull, Not Automatic Bidirectional | Accepted |
+| [0023](0023-automatic-push-on-peer-discovery.md) | Automatic Push on Peer Discovery, Deferring "Is It Actually Newer" to Phase 17 | Accepted |
 
 ## Template for new ADRs
 

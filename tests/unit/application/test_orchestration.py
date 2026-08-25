@@ -1,11 +1,13 @@
 """Unit tests for SyncOrchestrator."""
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
+from pathlib import Path
+from unittest.mock import AsyncMock, call
 
 import pytest
 
 from securesync.application.orchestration import SyncOrchestrator, SyncState
+from securesync.application.use_cases.sync_file import SyncFileResult
 from securesync.domain.conflict import VersionVector
 from securesync.domain.metadata import FileMetadata
 from securesync.domain.networking import (
@@ -194,4 +196,125 @@ async def test_handle_peer_discovered_works_without_a_session_coordinator() -> N
     await orchestrator.start()
     await orchestrator.handle_peer_discovered(_peer())  # should not raise
 
+    await orchestrator.stop()
+
+
+def _orchestrator_with_auto_push(
+    sync_file_use_case: AsyncMock,
+    metadata_repo: AsyncMock | None = None,
+) -> SyncOrchestrator:
+    return SyncOrchestrator(
+        metadata_repo=metadata_repo or AsyncMock(),
+        discovery_use_case=AsyncMock(),
+        conflict_use_case=AsyncMock(),
+        sync_file_use_case=sync_file_use_case,
+        sync_root=Path("/sync"),
+        chunking_strategy=_chunking_strategy,
+        chunk_size=4 * 1024 * 1024,
+    )
+
+
+# A plain sentinel is enough here — the orchestrator only forwards it
+# to SyncFileUseCase.push, which is mocked in every test below.
+_chunking_strategy = object()
+
+
+@pytest.mark.asyncio
+async def test_handle_peer_discovered_pushes_every_known_file() -> None:
+    """Each locally known file gets pushed once a peer is discovered."""
+    metadata_repo = AsyncMock()
+    metadata_repo.list_all_files.return_value = [
+        FileMetadata("a.txt", VersionVector({"dev-1": 1}), datetime.now(UTC)),
+        FileMetadata("b.txt", VersionVector({"dev-1": 1}), datetime.now(UTC)),
+    ]
+    sync_file_use_case = AsyncMock()
+    sync_file_use_case.push.return_value = SyncFileResult(transferred_count=1)
+    orchestrator = _orchestrator_with_auto_push(sync_file_use_case, metadata_repo)
+    peer = _peer()
+
+    await orchestrator.start()
+    await orchestrator.handle_peer_discovered(peer)
+
+    sync_file_use_case.push.assert_has_awaits(
+        [
+            call(peer, Path("/sync"), "a.txt", _chunking_strategy, chunk_size=4 * 1024 * 1024),
+            call(peer, Path("/sync"), "b.txt", _chunking_strategy, chunk_size=4 * 1024 * 1024),
+        ],
+        any_order=True,
+    )
+    await orchestrator.stop()
+
+
+@pytest.mark.asyncio
+async def test_handle_peer_discovered_skips_deleted_files() -> None:
+    """A tombstoned file has nothing to push and must be skipped."""
+    metadata_repo = AsyncMock()
+    metadata_repo.list_all_files.return_value = [
+        FileMetadata("gone.txt", VersionVector({"dev-1": 1}), datetime.now(UTC), is_deleted=True),
+    ]
+    sync_file_use_case = AsyncMock()
+    orchestrator = _orchestrator_with_auto_push(sync_file_use_case, metadata_repo)
+
+    await orchestrator.start()
+    await orchestrator.handle_peer_discovered(_peer())
+
+    sync_file_use_case.push.assert_not_awaited()
+    await orchestrator.stop()
+
+
+@pytest.mark.asyncio
+async def test_handle_peer_discovered_survives_one_failed_push() -> None:
+    """One file failing to push must not stop the rest of the batch."""
+    metadata_repo = AsyncMock()
+    metadata_repo.list_all_files.return_value = [
+        FileMetadata("bad.txt", VersionVector({"dev-1": 1}), datetime.now(UTC)),
+        FileMetadata("good.txt", VersionVector({"dev-1": 1}), datetime.now(UTC)),
+    ]
+    sync_file_use_case = AsyncMock()
+    sync_file_use_case.push.side_effect = [
+        OSError("connection refused"),
+        SyncFileResult(transferred_count=1),
+    ]
+    orchestrator = _orchestrator_with_auto_push(sync_file_use_case, metadata_repo)
+
+    await orchestrator.start()
+    await orchestrator.handle_peer_discovered(_peer())
+
+    assert sync_file_use_case.push.await_count == 2
+    assert orchestrator.stats.errors_encountered == 1
+    assert orchestrator.state == SyncState.SYNCING
+    await orchestrator.stop()
+
+
+@pytest.mark.asyncio
+async def test_handle_peer_discovered_does_nothing_without_sync_file_use_case() -> None:
+    """The pre-Phase-16 default (no sync_file_use_case) must not raise or push."""
+    orchestrator = _orchestrator()
+
+    await orchestrator.start()
+    await orchestrator.handle_peer_discovered(_peer())  # should not raise
+
+    await orchestrator.stop()
+
+
+@pytest.mark.asyncio
+async def test_handle_peer_discovered_warns_when_auto_push_misconfigured() -> None:
+    """sync_file_use_case without sync_root/chunking_strategy/chunk_size must not push or raise."""
+    metadata_repo = AsyncMock()
+    metadata_repo.list_all_files.return_value = [
+        FileMetadata("a.txt", VersionVector({"dev-1": 1}), datetime.now(UTC)),
+    ]
+    sync_file_use_case = AsyncMock()
+    orchestrator = SyncOrchestrator(
+        metadata_repo=metadata_repo,
+        discovery_use_case=AsyncMock(),
+        conflict_use_case=AsyncMock(),
+        sync_file_use_case=sync_file_use_case,
+        # sync_root, chunking_strategy, chunk_size deliberately left unset
+    )
+
+    await orchestrator.start()
+    await orchestrator.handle_peer_discovered(_peer())  # should not raise
+
+    sync_file_use_case.push.assert_not_awaited()
     await orchestrator.stop()

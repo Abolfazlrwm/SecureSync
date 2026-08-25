@@ -33,6 +33,10 @@ class StorageConfig:
     sync_directory: str
     database_path: str = "metadata.db"
     chunk_repository_path: str = "chunks"
+    # Mirrors FixedSizeChunkingStrategy's own default (streaming_chunk_reader.py).
+    # Duplicated as a plain literal rather than imported, since domain code
+    # must not depend on infrastructure — see ADR-0001.
+    chunk_size: int = 4 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)

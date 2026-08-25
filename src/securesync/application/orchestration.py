@@ -5,15 +5,18 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from enum import StrEnum, unique
+from pathlib import Path
 
 import structlog
 
 from securesync.application.use_cases.conflict_resolution import DetectConflictUseCase
 from securesync.application.use_cases.discover_peers import DiscoverPeersUseCase
+from securesync.application.use_cases.sync_file import SyncFileUseCase
 from securesync.application.use_cases.transfer_chunks import (
     DownloadChunksUseCase,
     UploadChunksUseCase,
 )
+from securesync.domain.chunking import ChunkingStrategy
 from securesync.domain.handshake import SessionCoordinator
 from securesync.domain.metadata import MetadataRepository
 from securesync.domain.networking import Peer
@@ -68,6 +71,10 @@ class SyncOrchestrator:
         download_use_case: DownloadChunksUseCase | None = None,
         upload_use_case: UploadChunksUseCase | None = None,
         session_coordinator: SessionCoordinator | None = None,
+        sync_file_use_case: SyncFileUseCase | None = None,
+        sync_root: Path | None = None,
+        chunking_strategy: ChunkingStrategy | None = None,
+        chunk_size: int | None = None,
     ) -> None:
         """Initialize the orchestrator.
 
@@ -86,6 +93,16 @@ class SyncOrchestrator:
                 Without one, peers are tracked but chunk transfer has
                 no negotiated keys to use even if `download_use_case`/
                 `upload_use_case` are set.
+            sync_file_use_case: Pushes locally known files to a newly
+                discovered peer (see ``docs/adr/0023-automatic-push-on-peer-discovery.md``).
+                Without one, peer discovery still happens but nothing
+                is synced automatically — the pre-Phase-16 behavior.
+            sync_root: This device's local sync directory, required
+                when `sync_file_use_case` is set.
+            chunking_strategy: Decides chunk boundaries for files being
+                pushed, required when `sync_file_use_case` is set.
+            chunk_size: Recorded on manifests built for pushed files,
+                required when `sync_file_use_case` is set.
         """
         self._metadata_repo = metadata_repo
         self._discovery_use_case = discovery_use_case
@@ -93,6 +110,10 @@ class SyncOrchestrator:
         self._upload_use_case = upload_use_case
         self._conflict_use_case = conflict_use_case
         self._session_coordinator = session_coordinator
+        self._sync_file_use_case = sync_file_use_case
+        self._sync_root = sync_root
+        self._chunking_strategy = chunking_strategy
+        self._chunk_size = chunk_size
 
         self._state = SyncState.IDLE
         self._stats = SyncStats()

@@ -33,6 +33,7 @@ class YamlConfigLoader:
             sync_directory=storage_data.get("sync_directory", os.getcwd()),
             database_path=storage_data.get("database_path", "metadata.db"),
             chunk_repository_path=storage_data.get("chunk_repository_path", "chunks"),
+            chunk_size=storage_data.get("chunk_size", 4 * 1024 * 1024),
         )
 
         network = NetworkConfig(

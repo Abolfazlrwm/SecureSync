@@ -255,7 +255,8 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
     def _build_manifest_response(self, request_payload: dict[str, Any]) -> dict[str, Any]:
         """Look up the requested file's manifest and build a response payload for it."""
         relative_path = request_payload["relative_path"]
-        collection = self._chunk_repository.load(self._sync_root / relative_path)
+        resolved = self._safe_resolve(relative_path)
+        collection = self._chunk_repository.load(resolved)
         return {
             "found": collection is not None,
             "collection": collection_to_dict(collection) if collection is not None else None,
@@ -265,7 +266,7 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
         """Read the requested chunks' real bytes from the local file and build a response."""
         relative_path = request_payload["relative_path"]
         requested_hashes = set(request_payload["chunk_hashes"])
-        local_path = self._sync_root / relative_path
+        local_path = self._safe_resolve(relative_path)
         collection = self._chunk_repository.load(local_path)
 
         chunks_payload: list[dict[str, Any]] = []
@@ -325,6 +326,16 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
     def _pack_envelope(payload: EncryptedPayload) -> bytes:
         """Frame an `EncryptedPayload` as `nonce + tag + ciphertext`."""
         return payload.nonce + payload.tag + payload.ciphertext
+
+    def _safe_resolve(self, relative_path: str) -> Path:
+        """Resolve a relative path against sync_root, rejecting path traversal."""
+        resolved = (self._sync_root / relative_path).resolve()
+        sync_root_resolved = self._sync_root.resolve()
+        if not str(resolved).startswith(str(sync_root_resolved) + os.sep):
+            raise ValueError(
+                f"Path traversal rejected: {relative_path!r} escapes sync root"
+            )
+        return resolved
 
     @staticmethod
     def _unpack_envelope(envelope: bytes) -> EncryptedPayload:

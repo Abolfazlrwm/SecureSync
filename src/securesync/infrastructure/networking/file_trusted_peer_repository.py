@@ -13,6 +13,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import threading
 from pathlib import Path
 
 from securesync.domain.identity import TrustedPeerRepository
@@ -30,6 +31,7 @@ class FileTrustedPeerRepository(TrustedPeerRepository):
                 write if missing.
         """
         self._storage_path = storage_path
+        self._lock = threading.Lock()
 
     async def get_trusted_key(self, device_id: str) -> bytes | None:
         """Return the pinned public key for `device_id`, or None if never seen.
@@ -41,9 +43,10 @@ class FileTrustedPeerRepository(TrustedPeerRepository):
             The pinned raw Ed25519 public key, or None if this is the
             first time `device_id` has been seen.
         """
-        store = self._load()
-        hex_key = store.get(device_id)
-        return bytes.fromhex(hex_key) if hex_key is not None else None
+        with self._lock:
+            store = self._load()
+            hex_key = store.get(device_id)
+            return bytes.fromhex(hex_key) if hex_key is not None else None
 
     async def trust(self, device_id: str, public_key: bytes) -> None:
         """Pin `public_key` as trusted for `device_id`.
@@ -52,9 +55,10 @@ class FileTrustedPeerRepository(TrustedPeerRepository):
             device_id: The peer device ID to pin a key for.
             public_key: The raw Ed25519 public key to pin.
         """
-        store = self._load()
-        store[device_id] = public_key.hex()
-        self._save(store)
+        with self._lock:
+            store = self._load()
+            store[device_id] = public_key.hex()
+            self._save(store)
 
     def _load(self) -> dict[str, str]:
         """Read the trust store, returning an empty one if it doesn't exist yet."""

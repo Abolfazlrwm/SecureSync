@@ -35,7 +35,7 @@ VOLUME ["/home/securesync/data"]
 
 # Peer discovery (UDP) + transfer engine (TCP/TLS) — see docs/networking.md
 # and docs/configuration.md for how these are made configurable.
-EXPOSE 21027/udp 22000/tcp
+EXPOSE 8080/tcp 8082/tcp 8083/tcp
 
 ENTRYPOINT ["securesync"]
 CMD ["--help"]

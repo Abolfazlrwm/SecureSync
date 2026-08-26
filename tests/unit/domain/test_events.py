@@ -121,22 +121,25 @@ class TestDedupKey:
 
     def test_dedup_key_for_non_moved_event(self) -> None:
         """The dest component of the key is empty for non-MOVED events."""
+        p = Path("/watched/file.txt")
         event = FileSystemEvent(
             event_type=FileSystemEventType.MODIFIED,
-            src_path=Path("/watched/file.txt"),
+            src_path=p,
             is_directory=False,
         )
-        assert event.dedup_key == ("modified", "/watched/file.txt", "")
+        assert event.dedup_key == ("modified", str(p), "")
 
     def test_dedup_key_for_moved_event_includes_dest(self) -> None:
         """The dest component of the key reflects dest_path for MOVED events."""
+        src = Path("/watched/old.txt")
+        dest = Path("/watched/new.txt")
         event = FileSystemEvent(
             event_type=FileSystemEventType.MOVED,
-            src_path=Path("/watched/old.txt"),
-            dest_path=Path("/watched/new.txt"),
+            src_path=src,
+            dest_path=dest,
             is_directory=False,
         )
-        assert event.dedup_key == ("moved", "/watched/old.txt", "/watched/new.txt")
+        assert event.dedup_key == ("moved", str(src), str(dest))
 
     def test_identical_events_share_dedup_key(self) -> None:
         """Two separately constructed but logically-identical events match."""

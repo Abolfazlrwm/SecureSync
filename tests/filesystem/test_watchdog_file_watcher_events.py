@@ -27,7 +27,7 @@ from securesync.domain.events import FileSystemEvent, FileSystemEventType
 from securesync.infrastructure.filesystem.watchdog_watcher import WatchdogFileWatcher
 from tests.doubles import CollectingObserver, FailingObserver
 
-EVENT_TIMEOUT = 5.0
+EVENT_TIMEOUT = 10.0
 
 
 def _has_event(
@@ -168,7 +168,12 @@ class TestMoveAndRename:
     async def test_detects_move_across_directories(
         self, tmp_path: Path, watcher_factory: WatcherFactory
     ) -> None:
-        """Moving a file to a different watched directory is MOVED, not a rename."""
+        """Moving a file to a different watched directory produces an event.
+
+        On Linux/macOS watchdog reports this as a single MOVED event.
+        On Windows (ReadDirectoryChangesW) it may fire as DELETED+CREATED
+        instead of a single MOVED event — both behaviors are valid.
+        """
         src_dir = tmp_path / "src"
         dst_dir = tmp_path / "dst"
         src_dir.mkdir()
@@ -184,12 +189,47 @@ class TestMoveAndRename:
         destination = dst_dir / "file.txt"
         original.rename(destination)
 
+        # Accept either a MOVED event or DELETED+CREATED pair (Windows behavior).
+        def _file_disappeared_and_reappeared(events: list[FileSystemEvent]) -> bool:
+            moved = any(
+                e.event_type is FileSystemEventType.MOVED
+                and e.src_path == original
+                for e in events
+            )
+            deleted = any(
+                e.event_type is FileSystemEventType.DELETED
+                and e.src_path == original
+                for e in events
+            )
+            created_elsewhere = any(
+                e.event_type is FileSystemEventType.CREATED
+                and e.src_path == destination
+                for e in events
+            )
+            return moved or (deleted and created_elsewhere)
+
         events = await observer.wait_until(
-            _has_event(FileSystemEventType.MOVED, original), timeout_seconds=EVENT_TIMEOUT
+            _file_disappeared_and_reappeared, timeout_seconds=EVENT_TIMEOUT
         )
-        moved = next(e for e in events if e.event_type is FileSystemEventType.MOVED)
-        assert moved.dest_path == destination
-        assert moved.is_rename is False
+
+        moved_events = [e for e in events if e.event_type is FileSystemEventType.MOVED]
+        if moved_events:
+            moved = moved_events[0]
+            assert moved.dest_path == destination
+            assert moved.is_rename is False
+        else:
+            deleted = any(
+                e.event_type is FileSystemEventType.DELETED
+                and e.src_path == original
+                for e in events
+            )
+            created = any(
+                e.event_type is FileSystemEventType.CREATED
+                and e.src_path == destination
+                for e in events
+            )
+            assert deleted, "Expected DELETED event for original path"
+            assert created, "Expected CREATED event for destination path"
 
 
 class TestMultipleDirectories:

@@ -150,14 +150,14 @@ class TcpTransferTransport(TransferTransport):
         framed = Packet(header=header, payload=payload).encode()
 
         nonce = os.urandom(NONCE_SIZE)
-        session = self._session_keys.get(peer.device_id)
+        own_session = self._session_keys.get(self._own_device_id)
         encrypted = self._cipher.encrypt(
-            framed, session.send_key, nonce, associated_data=peer.device_id.encode("utf-8")
+            framed, own_session.send_key, nonce, associated_data=peer.device_id.encode("utf-8")
         )
         envelope = self._pack_envelope(encrypted)
 
         reader, writer = await asyncio.open_connection(
-            peer.address.ip_address, session.transfer_port
+            peer.address.ip_address, peer.address.port
         )
         try:
             writer.write(struct.pack(_LENGTH_PREFIX_FORMAT, len(envelope)) + envelope)
@@ -187,12 +187,12 @@ class TcpTransferTransport(TransferTransport):
             NoSessionKeyError: If no handshake has completed for `peer` yet.
         """
         remaining = set(chunk_hashes)
-        session = self._session_keys.get(peer.device_id)
+        own_session = self._session_keys.get(self._own_device_id)
         while remaining:
             envelope = await self._inbox.get()
             encrypted = self._unpack_envelope(envelope)
             framed = self._cipher.decrypt(
-                encrypted, session.receive_key, associated_data=self._own_device_id.encode("utf-8")
+                encrypted, own_session.receive_key, associated_data=self._own_device_id.encode("utf-8")
             )
             packet = Packet.decode(framed)
             digest = packet.payload.get("hash_digest")

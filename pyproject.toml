@@ -41,6 +41,8 @@ dependencies = [
     "rich>=13.7",           # Terminal rendering for the live dashboard
     "pyyaml>=6.0",          # YAML configuration files
     "structlog>=24.1",      # Structured logging (introduced when logging lands)
+    "aiosqlite>=0.20",      # Async SQLite for metadata persistence (Phase 8)
+    "zeroconf>=0.131",      # mDNS peer discovery on local networks (Phase 4)
 ]
 
 [project.optional-dependencies]

@@ -235,7 +235,7 @@ async def test_handle_peer_discovered_pushes_every_known_file() -> None:
     await orchestrator.start()
     await orchestrator.handle_peer_discovered(peer)
 
-    sync_file_use_case.push.assert_has_awaits(
+    sync_file_use_case.sync.assert_has_awaits(
         [
             call(peer, Path("/sync"), "a.txt", _chunking_strategy, chunk_size=4 * 1024 * 1024),
             call(peer, Path("/sync"), "b.txt", _chunking_strategy, chunk_size=4 * 1024 * 1024),
@@ -271,7 +271,7 @@ async def test_handle_peer_discovered_survives_one_failed_push() -> None:
         FileMetadata("good.txt", VersionVector({"dev-1": 1}), datetime.now(UTC)),
     ]
     sync_file_use_case = AsyncMock()
-    sync_file_use_case.push.side_effect = [
+    sync_file_use_case.sync.side_effect = [
         OSError("connection refused"),
         SyncFileResult(transferred_count=1),
     ]
@@ -280,7 +280,7 @@ async def test_handle_peer_discovered_survives_one_failed_push() -> None:
     await orchestrator.start()
     await orchestrator.handle_peer_discovered(_peer())
 
-    assert sync_file_use_case.push.await_count == 2
+    assert sync_file_use_case.sync.await_count == 2
     assert orchestrator.stats.errors_encountered == 1
     assert orchestrator.state == SyncState.SYNCING
     await orchestrator.stop()

@@ -179,6 +179,28 @@ Status is updated at the end of every phase alongside `CHANGELOG.md`.
       deciding *which* direction is correct for a given file — real
       conflict detection wired to this path — is still the caller's
       job; `SyncOrchestrator` still doesn't call this automatically.
+- [x] **Phase 16 — Automatic Push on Peer Discovery**
+      `SyncOrchestrator._auto_push_known_files` pushes every locally
+      known, non-deleted file to a newly discovered peer unconditionally,
+      relying on `SyncFileUseCase.push`'s manifest diff to no-op when
+      nothing is missing. Session establishment is wired in — each newly
+      discovered peer gets an `X25519Handshake` via `SessionCoordinator`
+      before any push is attempted. Decision on *which direction* to take
+      for a given file (push vs. pull) is deliberately left to Phase 17;
+      Phase 16 is always-push, matching the pre-existing behavior that
+      ADR-0023 described. See ADR-0023.
+- [x] **Phase 17 — Version-Aware Sync Direction**
+      `SyncDirectionResolver` compares local vs. remote `VersionVector`
+      (now included in manifest responses via `ManifestWithVersion`)
+      and returns PUSH, PULL, CONFLICT, or NOOP. `SyncFileUseCase.sync()`
+      orchestrates the full flow: request manifest → resolve direction →
+      push/pull/noop/conflict. On CONFLICT, falls back to
+      `LastWriterWinsStrategy` (Phase 7) instead of crashing. When the
+      peer has no version vector (legacy/no-version peers), the resolver
+      falls back to content-hash-only comparison. The orchestrator's
+      auto-push loop now calls `sync()` instead of `push()`.
+      Also fixed: `TcpTransferTransport` send/receive key-lookup bug
+      (was looking up peer's session instead of own). See ADR-0024.
 
 ## Advanced features (introduced opportunistically, in the phase they fit)
 

@@ -9,6 +9,14 @@ delivery. Reuses the already-negotiated
 :class:`~securesync.infrastructure.networking.session_key_store.PeerSession`
 keys from the same handshake `TcpTransferTransport` uses — no separate
 key exchange for this port.
+
+Phase 17: the response now includes the file's `VersionVector`
+alongside its `ChunkCollection`, so the caller can decide
+push/pull/conflict/noop without re-querying. The version comes from a
+`MetadataRepository` (SQLite-backed in production); if none is
+configured the returned version is `None` and the caller falls back
+to content-hash-only diffing. See
+``docs/adr/0024-version-aware-sync-direction.md``.
 """
 
 from __future__ import annotations
@@ -18,16 +26,20 @@ import os
 import struct
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import msgpack  # type: ignore[import-untyped]
 import structlog
 
 from securesync.core.protocol import Packet, PacketType, make_header
-from securesync.domain.chunk import Chunk, ChunkAlgorithm, ChunkCollection, ChunkHash, ChunkMetadata
+from securesync.domain.chunk import Chunk, ChunkAlgorithm, ChunkHash, ChunkMetadata
 from securesync.domain.chunking import ChunkRepository
+from securesync.domain.conflict import VersionVector
 from securesync.domain.crypto import NONCE_SIZE, TAG_SIZE, AeadCipher, EncryptedPayload
-from securesync.domain.manifest_exchange import ManifestExchangeTransport
+from securesync.domain.manifest_exchange import (
+    ManifestExchangeTransport,
+    ManifestWithVersion,
+)
 from securesync.domain.networking import Peer
 from securesync.infrastructure.chunking.file_chunk_repository import (
     collection_from_dict,
@@ -39,6 +51,20 @@ logger = structlog.get_logger(__name__)
 
 _LENGTH_PREFIX_FORMAT = ">I"
 _LENGTH_PREFIX_SIZE = struct.calcsize(_LENGTH_PREFIX_FORMAT)
+
+
+class _MetadataLookup(Protocol):
+    """Minimum MetadataRepository surface the manifest exchange needs.
+
+    Kept narrow so callers can pass any object that exposes
+    `get_file_metadata(relative_path) -> FileMetadata | None`. The
+    full `MetadataRepository` ABC satisfies this naturally; defining
+    it locally keeps this module's import surface independent of the
+    metadata infrastructure layout.
+    """
+
+    async def get_file_metadata(self, file_path: str) -> Any:  # returns FileMetadata | None
+        ...
 
 
 class TcpManifestExchangeTransport(ManifestExchangeTransport):
@@ -53,6 +79,7 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
         session_keys: SessionKeyStore,
         chunk_repository: ChunkRepository,
         sync_root: Path,
+        metadata_lookup: _MetadataLookup | None = None,
     ) -> None:
         """Initialize the transport.
 
@@ -75,6 +102,14 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
                 layouts) — `sync_root` is what turns that relative
                 path back into this device's own absolute path before
                 looking it up in `chunk_repository`.
+            metadata_lookup: Optional metadata repository for resolving
+                a file's `VersionVector`. When provided, manifest
+                responses include the peer-side version vector so
+                `SyncDirectionResolver` can decide push/pull/conflict
+                without a second round trip. When ``None`` (legacy
+                setups, tests) the version is reported as ``None``
+                and the caller falls back to content-hash-only
+                direction decisions.
         """
         self._own_device_id = own_device_id
         self._listen_host = listen_host
@@ -83,6 +118,7 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
         self._session_keys = session_keys
         self._chunk_repository = chunk_repository
         self._sync_root = sync_root
+        self._metadata_lookup = metadata_lookup
         self._message_id = 0
         self._server: asyncio.Server | None = None
 
@@ -110,8 +146,8 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
             self._server = None
             logger.info("manifest_exchange_stopped")
 
-    async def request_manifest(self, peer: Peer, relative_path: str) -> ChunkCollection | None:
-        """Request `peer`'s manifest for `relative_path`.
+    async def request_manifest(self, peer: Peer, relative_path: str) -> ManifestWithVersion | None:
+        """Request `peer`'s manifest + version for `relative_path`.
 
         Args:
             peer: The peer to request the manifest from.
@@ -121,7 +157,9 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
                 generally live at different absolute locations.
 
         Returns:
-            The peer's `ChunkCollection`, or `None` if it doesn't have that file.
+            A `ManifestWithVersion` carrying the peer's
+            `ChunkCollection` and its `VersionVector`, or `None` if
+            the peer doesn't have that file.
 
         Raises:
             OSError: If `peer` can't be reached.
@@ -158,7 +196,14 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
         response_packet = Packet.decode(response_framed)
         if not response_packet.payload["found"]:
             return None
-        return collection_from_dict(response_packet.payload["collection"])
+
+        collection = collection_from_dict(response_packet.payload["collection"])
+        # Peer reports its VersionVector as a counters dict (or None).
+        version_payload = response_packet.payload.get("version")
+        version = (
+            VersionVector(dict(version_payload["counters"])) if version_payload else None
+        )
+        return ManifestWithVersion(collection=collection, version=version)
 
     async def request_chunks(
         self, peer: Peer, relative_path: str, chunk_hashes: list[str]
@@ -229,7 +274,7 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
                 response_payload = self._build_chunk_response(request_packet.payload)
                 response_type = PacketType.CHUNK_DATA
             else:
-                response_payload = self._build_manifest_response(request_packet.payload)
+                response_payload = await self._build_manifest_response(request_packet.payload)
                 response_type = PacketType.FILE_MANIFEST
 
             response_header = make_header(response_type, message_id=self._next_message_id())
@@ -252,15 +297,35 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
             except ConnectionError:
                 pass
 
-    def _build_manifest_response(self, request_payload: dict[str, Any]) -> dict[str, Any]:
-        """Look up the requested file's manifest and build a response payload for it."""
+    async def _build_manifest_response(self, request_payload: dict[str, Any]) -> dict[str, Any]:
+        """Look up the requested file's manifest + version and build a response payload."""
         relative_path = request_payload["relative_path"]
         resolved = self._safe_resolve(relative_path)
         collection = self._chunk_repository.load(resolved)
+        version = await self._resolve_version(relative_path)
         return {
             "found": collection is not None,
             "collection": collection_to_dict(collection) if collection is not None else None,
+            # Version is included even when the chunk collection isn't found
+            # — a peer may know the file's lineage without a manifest cached
+            # yet, though in practice both are written together.
+            "version": {"counters": version.counters} if version is not None else None,
         }
+
+    async def _resolve_version(self, relative_path: str) -> VersionVector | None:
+        """Look up the local VersionVector for `relative_path`.
+
+        Returns None if no metadata lookup is configured, or if the
+        metadata repository has no record for this file (e.g. a file
+        that exists on disk but hasn't been seen by the orchestrator
+        yet, or a peer that doesn't persist versions).
+        """
+        if self._metadata_lookup is None:
+            return None
+        meta = await self._metadata_lookup.get_file_metadata(relative_path)
+        if meta is None:
+            return None
+        return getattr(meta, "version_vector", None)
 
     def _build_chunk_response(self, request_payload: dict[str, Any]) -> dict[str, Any]:
         """Read the requested chunks' real bytes from the local file and build a response."""

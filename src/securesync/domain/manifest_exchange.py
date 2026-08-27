@@ -10,22 +10,47 @@ request/response round trip" limitation). `ManifestExchangeTransport`
 is where a real pull lives: `request_manifest` asks what a peer has
 for a file; `request_chunks` asks for specific chunks' actual bytes.
 See ``docs/adr/0022-file-synchronization-use-case.md``.
+
+Phase 17: `request_manifest` now returns a `ManifestWithVersion` —
+the chunk collection paired with the `VersionVector` the peer
+recorded for that file's causal history — so callers can decide
+which direction to sync (push, pull, conflict, noop) without
+re-fetching metadata from a second port. See
+``docs/adr/0024-version-aware-sync-direction.md``.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 
 from securesync.domain.chunk import Chunk, ChunkCollection
+from securesync.domain.conflict import VersionVector
 from securesync.domain.networking import Peer
+
+
+@dataclass(frozen=True, slots=True)
+class ManifestWithVersion:
+    """A peer's manifest paired with the VersionVector that describes its lineage.
+
+    Attributes:
+        collection: The ChunkCollection the peer holds for this file.
+        version: The VersionVector the peer recorded for this file's
+            causal history. ``None`` means the peer has the file but
+            no recorded version (a peer that doesn't use SyncOrchestrator
+            or that pre-dates Phase 7).
+    """
+
+    collection: ChunkCollection
+    version: VersionVector | None
 
 
 class ManifestExchangeTransport(ABC):
     """Requests a peer's chunk manifest, and specific chunks' bytes, for a file."""
 
     @abstractmethod
-    async def request_manifest(self, peer: Peer, relative_path: str) -> ChunkCollection | None:
+    async def request_manifest(self, peer: Peer, relative_path: str) -> ManifestWithVersion | None:
         """Request `peer`'s manifest for `relative_path`.
 
         Args:
@@ -37,8 +62,8 @@ class ManifestExchangeTransport(ABC):
                 absolute path can't be a shared identifier between them.
 
         Returns:
-            The peer's `ChunkCollection` for that file, or `None` if
-            the peer doesn't have (or doesn't recognize) that file.
+            The peer's manifest + version vector for that file, or
+            `None` if the peer doesn't have (or doesn't recognize) that file.
 
         Raises:
             OSError: If the peer can't be reached.
@@ -46,7 +71,7 @@ class ManifestExchangeTransport(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def request_chunks(
+    def request_chunks(
         self, peer: Peer, relative_path: str, chunk_hashes: list[str]
     ) -> AsyncIterator[Chunk]:
         """Request specific chunks' bytes for `relative_path` from `peer`, by hash.

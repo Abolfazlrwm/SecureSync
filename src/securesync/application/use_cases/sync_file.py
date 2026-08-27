@@ -15,9 +15,16 @@ session: an automatic-bidirectional first version of this use case
 produced exactly that corruption (a device's fresh local edit
 overwritten by a peer's stale copy of the same chunk). Requiring the
 caller to say which direction it means removes the ambiguity
-entirely; deciding *which* direction is correct for a given file is
-real conflict resolution, deliberately out of scope here — see
-``docs/adr/0022-file-synchronization-use-case.md``.
+entirely.
+
+Phase 17: `sync` is a higher-level method that consults
+:class:`~securesync.domain.sync_direction.SyncDirectionResolver` and
+then dispatches to `push` / `pull` / `noop` / `conflict` handling
+automatically — using the `VersionVector` the peer's manifest
+response now carries. Conflict falls back to
+:class:`~securesync.application.use_cases.conflict_resolution.LastWriterWinsStrategy`
+rather than crashing. See
+``docs/adr/0024-version-aware-sync-direction.md``.
 """
 
 from __future__ import annotations
@@ -31,27 +38,41 @@ import structlog
 
 from securesync.application.use_cases.calculate_chunk_hashes import CalculateChunkHashesUseCase
 from securesync.application.use_cases.chunk_file import ChunkFileUseCase
+from securesync.application.use_cases.conflict_resolution import LastWriterWinsStrategy
 from securesync.application.use_cases.transfer_chunks import UploadChunksUseCase
 from securesync.domain.chunk import Chunk, ChunkCollection
 from securesync.domain.chunk_exceptions import ChunkSourceNotFoundError
 from securesync.domain.chunking import ChunkingStrategy, ChunkRepository
+from securesync.domain.conflict import MergeStrategy, VersionVector
 from securesync.domain.delta import DeltaCalculator
-from securesync.domain.manifest_exchange import ManifestExchangeTransport
+from securesync.domain.manifest_exchange import (
+    ManifestExchangeTransport,
+    ManifestWithVersion,
+)
 from securesync.domain.networking import Peer
 from securesync.domain.reconstruction import FileReconstructor
+from securesync.domain.sync_direction import (
+    SyncDirection,
+    SyncDirectionDecision,
+    SyncDirectionResolver,
+)
 
 logger = structlog.get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
 class SyncFileResult:
-    """The outcome of a `push` or `pull` sync with a peer.
+    """The outcome of a `push`, `pull`, or `sync` with a peer.
 
     Attributes:
         transferred_count: How many chunks were sent or received.
+        direction: The direction actually taken (push/pull/noop).
+            ``None`` for the explicit `push`/`pull` methods, which
+            don't make a direction decision.
     """
 
     transferred_count: int
+    direction: str | None = None
 
 
 class SyncFileUseCase:
@@ -65,15 +86,17 @@ class SyncFileUseCase:
         upload_use_case: UploadChunksUseCase,
         chunk_repository: ChunkRepository,
         file_reconstructor: FileReconstructor,
+        local_version_provider: LocalVersionProvider | None = None,
+        direction_resolver: SyncDirectionResolver | None = None,
     ) -> None:
         """Initialize the use case.
 
         Args:
-            manifest_exchange: Requests the peer's manifest for the
-                file, and pulls specific missing chunks' real bytes
-                (a genuine request/response — see
-                ``docs/adr/0022-file-synchronization-use-case.md`` for
-                why this doesn't use
+            manifest_exchange: Requests the peer's manifest (and
+                `VersionVector`) for the file, and pulls specific
+                missing chunks' real bytes (a genuine request/response
+                — see ``docs/adr/0022-file-synchronization-use-case.md``
+                for why this doesn't use
                 :class:`~securesync.domain.transfer.TransferTransport`'s
                 `request_chunks`, which only waits passively for
                 whatever a peer already chose to push).
@@ -86,6 +109,13 @@ class SyncFileUseCase:
                 saved as the new baseline once sync completes.
             file_reconstructor: Writes downloaded chunks into the
                 local file at their correct offset.
+            local_version_provider: Optional callable returning the
+                local `VersionVector` for a given relative path. When
+                provided, `sync` uses it together with the peer's
+                reported version to decide push/pull/conflict.
+            direction_resolver: Optional `SyncDirectionResolver`. When
+                omitted, a default stateless instance is used (the
+                service is pure, so sharing the default is safe).
         """
         self._manifest_exchange = manifest_exchange
         self._chunk_file_use_case = chunk_file_use_case
@@ -93,6 +123,8 @@ class SyncFileUseCase:
         self._upload_use_case = upload_use_case
         self._chunk_repository = chunk_repository
         self._file_reconstructor = file_reconstructor
+        self._local_version_provider = local_version_provider
+        self._direction_resolver = direction_resolver or SyncDirectionResolver()
         self._calculator = DeltaCalculator()
 
     async def push(
@@ -219,16 +251,139 @@ class SyncFileUseCase:
         )
         return SyncFileResult(transferred_count=transferred_count)
 
+    async def sync(
+        self,
+        peer: Peer,
+        sync_root: Path,
+        relative_path: str,
+        strategy: ChunkingStrategy,
+        *,
+        chunk_size: int,
+        merge_strategy: MergeStrategy | None = None,
+    ) -> SyncFileResult:
+        """Decide direction, then push / pull / noop / conflict-handle accordingly.
+
+        Phase 17: consults `SyncDirectionResolver` using the local
+        + peer `VersionVector` and the two manifests. On CONFLICT,
+        falls back to `LastWriterWinsStrategy` (Phase 7) — choosing
+        "remote wins" pulls the peer's version; choosing "local
+        wins" no-ops. `merge_strategy` lets a caller inject a
+        different policy; default is `LastWriterWinsStrategy()`.
+
+        If ``merge_strategy`` is ``None`` a default
+        :class:`~securesync.application.use_cases.conflict_resolution.LastWriterWinsStrategy`
+        is used automatically (no None-check needed inside the method).
+
+        Args:
+            peer: The peer to sync with.
+            sync_root: This device's local sync directory.
+            relative_path: The file to sync, relative to `sync_root`.
+            strategy: Decides where each chunk boundary falls.
+            chunk_size: Recorded on manifests built during this sync.
+            merge_strategy: Optional pluggable conflict policy. If
+                ``None`` (default),
+                :class:`~securesync.application.use_cases.conflict_resolution.LastWriterWinsStrategy`
+                is used automatically.
+
+        Returns:
+            A `SyncFileResult` with `direction` populated (push/pull/noop).
+        """
+        if merge_strategy is None:
+            merge_strategy = LastWriterWinsStrategy()
+
+        source_path = sync_root / relative_path
+        local_collection = await self._local_manifest_or_empty(source_path, strategy, chunk_size)
+        local_version = (
+            await self._local_version_provider(relative_path)
+            if self._local_version_provider is not None
+            else None
+        )
+
+        peer_mv = await self._request_peer_manifest_with_version(peer, relative_path)
+        if peer_mv is None:
+            # Peer doesn't have it at all — only meaningful if we do.
+            if local_collection.chunk_count > 0:
+                logger.info(
+                    "file_pushed_no_peer_manifest",
+                    peer_id=peer.device_id,
+                    relative_path=relative_path,
+                )
+                return await self.push(
+                    peer, sync_root, relative_path, strategy, chunk_size=chunk_size
+                )
+            return SyncFileResult(transferred_count=0, direction=SyncDirection.NOOP.value)
+
+        decision: SyncDirectionDecision = self._direction_resolver.resolve(
+            local_collection=local_collection,
+            local_version=local_version,
+            remote_collection=peer_mv.collection,
+            remote_version=peer_mv.version,
+        )
+        logger.info(
+            "sync_direction_resolved",
+            peer_id=peer.device_id,
+            relative_path=relative_path,
+            direction=decision.direction.value,
+            reason=decision.reason,
+        )
+
+        if decision.direction is SyncDirection.PUSH:
+            return await self.push(
+                    peer, sync_root, relative_path, strategy, chunk_size=chunk_size
+                )
+        if decision.direction is SyncDirection.PULL:
+            return await self.pull(peer, sync_root, relative_path, strategy, chunk_size=chunk_size)
+        if decision.direction is SyncDirection.NOOP:
+            return SyncFileResult(transferred_count=0, direction=SyncDirection.NOOP.value)
+
+        # CONFLICT — defer to the merge strategy.
+        from securesync.domain.conflict import ConflictMetadata, ConflictType
+
+        local_conflict = ConflictMetadata(
+            conflict_id=f"sync-{relative_path}-{peer.device_id}",
+            file_path=relative_path,
+            conflict_type=ConflictType.CONCURRENT_MODIFICATION,
+            local_version=local_version or VersionVector(),
+            remote_version=peer_mv.version or VersionVector(),
+            remote_device_id=peer.device_id,
+        )
+        remote_conflict = ConflictMetadata(
+            conflict_id=f"sync-{relative_path}-local",
+            file_path=relative_path,
+            conflict_type=ConflictType.CONCURRENT_MODIFICATION,
+            local_version=peer_mv.version or VersionVector(),
+            remote_version=local_version or VersionVector(),
+            remote_device_id=self._own_device_id(peer),
+        )
+        remote_wins = merge_strategy.merge(local_conflict, remote_conflict)
+        if remote_wins:
+            return await self.pull(peer, sync_root, relative_path, strategy, chunk_size=chunk_size)
+        return SyncFileResult(transferred_count=0, direction=SyncDirection.NOOP.value)
+
+    @staticmethod
+    def _own_device_id(peer: Peer) -> str:
+        """Best-effort 'own device id' for the conflict metadata.
+
+        Falls back to a sentinel string when not threaded through
+        the use case explicitly (Phase 17 keeps the use case
+        peer-agnostic; main.py will override via a richer wiring in
+        Phase 18+). The conflict ID is informational only.
+        """
+        return peer.address.ip_address or "local"
+
+    async def _request_peer_manifest_with_version(
+        self, peer: Peer, relative_path: str
+    ) -> ManifestWithVersion | None:
+        """Fetch the peer's manifest + version, normalizing the source path."""
+        peer_mv = await self._manifest_exchange.request_manifest(peer, relative_path)
+        if peer_mv is None:
+            return None
+        return peer_mv
+
     async def _local_manifest_or_empty(
         self, source_path: Path, strategy: ChunkingStrategy, chunk_size: int
     ) -> ChunkCollection:
-        """Build the local manifest, or an empty one if `source_path` doesn't exist yet.
-
-        A file being pulled for the first time (the peer has it, this
-        device doesn't) has nothing local to build a manifest from —
-        that's a normal starting state, not an error, so it's treated
-        as "zero chunks" rather than propagating `ChunkSourceNotFoundError`.
-        """
+        """Build the local manifest, or an empty one if `source_path` doesn't exist yet."""
         try:
             return await self._calculate_hashes_use_case.build_manifest(
                 source_path, strategy, chunk_size=chunk_size
@@ -241,20 +396,11 @@ class SyncFileUseCase:
     async def _normalized_peer_manifest(
         self, peer: Peer, relative_path: str, source_path: Path
     ) -> ChunkCollection | None:
-        """Request the peer's manifest, with its path normalized to this device's own.
-
-        `DeltaCalculator` requires `baseline.source_path == current.source_path`
-        (a same-local-file invariant from its Phase 3 design — see
-        ADR-0009). The peer's manifest carries *its own* absolute
-        path, which is legitimately different from this device's for
-        the same logical file (ADR-0022), so it's normalized here
-        rather than relaxing that invariant in `DeltaCalculator`
-        itself, which is still correct for its original, purely-local use.
-        """
-        peer_manifest = await self._manifest_exchange.request_manifest(peer, relative_path)
-        if peer_manifest is None:
+        """Request the peer's manifest, with its path normalized to this device's own."""
+        peer_mv = await self._manifest_exchange.request_manifest(peer, relative_path)
+        if peer_mv is None:
             return None
-        return replace(peer_manifest, source_path=source_path)
+        return replace(peer_mv.collection, source_path=source_path)
 
     async def _filter_chunks_to_upload(
         self, source_path: Path, strategy: ChunkingStrategy, needed_hashes: set[str]
@@ -264,3 +410,10 @@ class SyncFileUseCase:
             chunk_hash = chunk.metadata.chunk_hash
             if chunk_hash is not None and chunk_hash.digest in needed_hashes:
                 yield chunk
+
+
+class LocalVersionProvider:
+    """Callable returning the local VersionVector for a relative path."""
+
+    async def __call__(self, relative_path: str) -> VersionVector | None:
+        ...

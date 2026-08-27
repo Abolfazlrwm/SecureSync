@@ -289,7 +289,7 @@ class SyncOrchestrator:
                 continue
 
             try:
-                result = await self._sync_file_use_case.push(
+                result = await self._sync_file_use_case.sync(
                     peer,
                     self._sync_root,
                     file_metadata.file_path,

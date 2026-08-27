@@ -7,7 +7,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from securesync.domain.networking import Peer, PeerAddress, PeerCapabilities, PeerStatus
 from securesync.infrastructure.networking.session_key_store import SessionKeyStore
 from securesync.infrastructure.networking.tcp_manifest_exchange import TcpManifestExchangeTransport
 

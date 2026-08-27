@@ -73,8 +73,8 @@ class TestRequestManifest:
             result = await transport_a.request_manifest(_peer("dev-b", 19402), "shared.txt")
 
             assert result is not None
-            assert result.chunks[0].chunk_hash is not None
-            assert result.chunks[0].chunk_hash.digest == "a" * 64
+            assert result.collection.chunks[0].chunk_hash is not None
+            assert result.collection.chunks[0].chunk_hash.digest == "a" * 64
         finally:
             await transport_a.stop()
             await transport_b.stop()

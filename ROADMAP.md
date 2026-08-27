@@ -87,18 +87,14 @@ Status is updated at the end of every phase alongside `CHANGELOG.md`.
       `InProcessTransferTransport` (real AEAD encryption, real
       `core/protocol.py` framing) proves the crypto+transfer wiring is
       correct for same-process peer pairs.
-- [ ] **Phase 11 — Real Network Transport**
-      `TcpTransferTransport` (real `asyncio` sockets, length-prefixed
-      AEAD-encrypted framing) is built and verified over real
-      localhost sockets — see ADR-0017. Left unchecked because it's
-      not wired into `main.py` yet: it needs a per-session key that
-      nothing in this codebase currently negotiates between two real
-      processes. `PacketType.HELLO`/`KEY_EXCHANGE`/`AUTH` are declared
-      in `core/protocol.py` and `PycaKeyExchangeProvider` exists, but
-      no handshake calls them. That handshake — and resolving
-      `derive_session_keys`'s send/receive key-swap ambiguity as part
-      of it — is what remains before `main.py` can sync with a real
-      remote peer.
+- [ ]   - [x] **Phase 11 — Real Network Transport**
+          `TcpTransferTransport` (real `asyncio` sockets, length-prefixed
+          AEAD-encrypted framing) is built and verified over real
+          localhost sockets — see ADR-0017. The gaps this entry originally
+          disclosed (per-session key negotiation and main.py wiring) were
+          completed by Phase 12 (key exchange handshake) and Phase 13
+          (full main.py wiring with Ed25519 identity, trust-on-first-use,
+          and multi-peer session keys).
 - [x] **Phase 12 — Key Exchange Handshake**
       `X25519Handshake` performs a real X25519 exchange over a real
       TCP connection and resolves the exact key-swap ambiguity Phase
@@ -164,7 +160,7 @@ Status is updated at the end of every phase alongside `CHANGELOG.md`.
       (fixed by making `push`/`pull` separate, explicit-direction
       methods instead of one method that reconciles both ways —
       removing the ambiguity, not patching around it). Also required
-      a genuine chunk-data *pull* (`ManifestExchangeTransport.request_chunks`)
+      a genuine chunk-data _pull_ (`ManifestExchangeTransport.request_chunks`)
       since `TransferTransport.request_chunks`'s "no real
       request/response round trip" limitation (disclosed back in
       ADR-0017/0018) turned out to hang forever the first time a real
@@ -176,7 +172,7 @@ Status is updated at the end of every phase alongside `CHANGELOG.md`.
       incremental edit pushed and pulled (only the changed chunk
       transferred each way), and a final no-op push — file contents
       matched byte-for-byte throughout. See ADR-0022. Not yet done:
-      deciding *which* direction is correct for a given file — real
+      deciding _which_ direction is correct for a given file — real
       conflict detection wired to this path — is still the caller's
       job; `SyncOrchestrator` still doesn't call this automatically.
 - [x] **Phase 16 — Automatic Push on Peer Discovery**
@@ -185,7 +181,7 @@ Status is updated at the end of every phase alongside `CHANGELOG.md`.
       relying on `SyncFileUseCase.push`'s manifest diff to no-op when
       nothing is missing. Session establishment is wired in — each newly
       discovered peer gets an `X25519Handshake` via `SessionCoordinator`
-      before any push is attempted. Decision on *which direction* to take
+      before any push is attempted. Decision on _which direction_ to take
       for a given file (push vs. pull) is deliberately left to Phase 17;
       Phase 16 is always-push, matching the pre-existing behavior that
       ADR-0023 described. See ADR-0023.

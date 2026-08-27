@@ -12,12 +12,14 @@ from securesync.application.use_cases.transfer_chunks import (
 from securesync.domain.chunk import Chunk, ChunkAlgorithm, ChunkHash, ChunkMetadata
 from securesync.domain.networking import Peer, PeerAddress, PeerCapabilities, PeerIdentity
 from securesync.infrastructure.crypto.pyca_crypto import AesGcmCipher
+from securesync.infrastructure.networking.session_key_store import PeerSession, SessionKeyStore
 from securesync.infrastructure.networking.tcp_transport import TcpTransferTransport
 
 # A's send_key must equal B's receive_key and vice versa — the same
 # invariant a real X25519Handshake produces (see test_x25519_handshake.py).
 KEY_1 = b"1" * 32
 KEY_2 = b"2" * 32
+WRONG_KEY = b"x" * 32
 
 
 def _peer(device_id: str, port: int) -> Peer:
@@ -26,6 +28,29 @@ def _peer(device_id: str, port: int) -> Peer:
         address=PeerAddress("127.0.0.1", port),
         capabilities=PeerCapabilities("1.0"),
     )
+
+
+def _session_keys(
+    a_id: str, a_port: int,
+    b_id: str, b_port: int,
+    a_send: bytes = KEY_1, b_send: bytes = KEY_2,
+) -> SessionKeyStore:
+    """Build a SessionKeyStore where A sends with a_send and B receives with a_send."""
+    store = SessionKeyStore()
+    store.put(a_id, PeerSession(send_key=a_send, receive_key=b_send, transfer_port=a_port, manifest_port=a_port))
+    store.put(b_id, PeerSession(send_key=b_send, receive_key=a_send, transfer_port=b_port, manifest_port=b_port))
+    return store
+
+
+def _session_keys_wrong(
+    a_id: str, a_port: int,
+    b_id: str, b_port: int,
+) -> SessionKeyStore:
+    """A sends KEY_1, B tries to decrypt with WRONG_KEY (should fail)."""
+    store = SessionKeyStore()
+    store.put(a_id, PeerSession(send_key=KEY_1, receive_key=KEY_2, transfer_port=a_port, manifest_port=a_port))
+    store.put(b_id, PeerSession(send_key=KEY_2, receive_key=WRONG_KEY, transfer_port=b_port, manifest_port=b_port))
+    return store
 
 
 def _chunk(chunk_id: str, data: bytes, digest: str) -> Chunk:
@@ -44,8 +69,9 @@ class TestSendAndRequestChunksOverRealSockets:
 
     async def test_a_sends_b_receives_over_a_real_socket(self) -> None:
         cipher = AesGcmCipher()
-        transport_a = TcpTransferTransport("dev-a", "127.0.0.1", 19301, cipher, KEY_1, KEY_2)
-        transport_b = TcpTransferTransport("dev-b", "127.0.0.1", 19302, cipher, KEY_2, KEY_1)
+        keys = _session_keys("dev-a", 19301, "dev-b", 19302)
+        transport_a = TcpTransferTransport("dev-a", "127.0.0.1", 19301, cipher, keys)
+        transport_b = TcpTransferTransport("dev-b", "127.0.0.1", 19302, cipher, keys)
         await transport_a.start()
         await transport_b.start()
         try:
@@ -66,8 +92,9 @@ class TestSendAndRequestChunksOverRealSockets:
     async def test_bidirectional_transfer(self) -> None:
         """Each side can both send and receive over its own listening socket."""
         cipher = AesGcmCipher()
-        transport_a = TcpTransferTransport("dev-a", "127.0.0.1", 19303, cipher, KEY_1, KEY_2)
-        transport_b = TcpTransferTransport("dev-b", "127.0.0.1", 19304, cipher, KEY_2, KEY_1)
+        keys = _session_keys("dev-a", 19303, "dev-b", 19304)
+        transport_a = TcpTransferTransport("dev-a", "127.0.0.1", 19303, cipher, keys)
+        transport_b = TcpTransferTransport("dev-b", "127.0.0.1", 19304, cipher, keys)
         await transport_a.start()
         await transport_b.start()
         try:
@@ -90,8 +117,9 @@ class TestSendAndRequestChunksOverRealSockets:
     async def test_wrong_key_fails_to_decrypt(self) -> None:
         """A responder with a mismatched receive_key can't decrypt what was sent."""
         cipher = AesGcmCipher()
-        transport_a = TcpTransferTransport("dev-a", "127.0.0.1", 19305, cipher, KEY_1, KEY_2)
-        transport_b = TcpTransferTransport("dev-b", "127.0.0.1", 19306, cipher, KEY_2, b"x" * 32)
+        keys_wrong = _session_keys_wrong("dev-a", 19305, "dev-b", 19306)
+        transport_a = TcpTransferTransport("dev-a", "127.0.0.1", 19305, cipher, keys_wrong)
+        transport_b = TcpTransferTransport("dev-b", "127.0.0.1", 19306, cipher, keys_wrong)
         await transport_a.start()
         await transport_b.start()
         try:
@@ -112,8 +140,9 @@ class TestAgainstRealUseCases:
 
     async def test_upload_then_download_round_trips_multiple_chunks(self) -> None:
         cipher = AesGcmCipher()
-        transport_a = TcpTransferTransport("dev-a", "127.0.0.1", 19307, cipher, KEY_1, KEY_2)
-        transport_b = TcpTransferTransport("dev-b", "127.0.0.1", 19308, cipher, KEY_2, KEY_1)
+        keys = _session_keys("dev-a", 19307, "dev-b", 19308)
+        transport_a = TcpTransferTransport("dev-a", "127.0.0.1", 19307, cipher, keys)
+        transport_b = TcpTransferTransport("dev-b", "127.0.0.1", 19308, cipher, keys)
         await transport_a.start()
         await transport_b.start()
         try:

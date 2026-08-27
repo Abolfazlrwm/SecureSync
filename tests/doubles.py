@@ -10,6 +10,8 @@ without any real I/O. ``FakeFileWatcher`` is that fake for
 are the equivalents for the ``domain.chunking`` ports.
 ``FakeIdentityProvider`` and ``FakeTrustedPeerRepository`` are the
 equivalents for ``domain.identity``'s ports.
+``FakeManifestExchangeTransport`` and ``FakeTransferTransport`` are the
+equivalents for the ``domain.transfer`` and ``domain.manifest_exchange`` ports.
 """
 
 from __future__ import annotations
@@ -27,9 +29,10 @@ from securesync.domain.chunking import (
     ChunkRepository,
     ChunkWriter,
 )
+from securesync.domain.conflict import VersionVector
 from securesync.domain.events import FileSystemEvent
 from securesync.domain.identity import IdentityKeyPair, IdentityProvider, TrustedPeerRepository
-from securesync.domain.manifest_exchange import ManifestExchangeTransport
+from securesync.domain.manifest_exchange import ManifestExchangeTransport, ManifestWithVersion
 from securesync.domain.networking import Peer
 from securesync.domain.transfer import TransferTransport
 from securesync.domain.watcher import FileSystemEventObserver, FileWatcher
@@ -105,11 +108,7 @@ class CollectingObserver:
         self._queue: asyncio.Queue[FileSystemEvent] = asyncio.Queue()
 
     async def on_file_event(self, event: FileSystemEvent) -> None:
-        """Append ``event`` to the log and wake any waiter.
-
-        Args:
-            event: The event delivered by the watcher.
-        """
+        """Append ``event`` to the log and wake any waiter."""
         self.events.append(event)
         await self._queue.put(event)
 
@@ -128,7 +127,6 @@ class CollectingObserver:
 
         Returns:
             A snapshot of the collected events once ``count`` is reached.
-
         Raises:
             TimeoutError: If ``count`` events aren't collected in time.
         """
@@ -151,11 +149,9 @@ class CollectingObserver:
 
         Returns:
             A snapshot of the collected events once ``predicate`` holds.
-
         Raises:
             TimeoutError: If the predicate never becomes true in time.
         """
-
         async def _wait_until_true() -> None:
             while not predicate(self.events):
                 await self._queue.get()
@@ -176,7 +172,6 @@ class FailingObserver:
 
         Args:
             event: The event delivered by the watcher (unused).
-
         Raises:
             RuntimeError: Always, to simulate a buggy observer.
         """
@@ -238,6 +233,7 @@ class FakeChunkHasher(ChunkHasher):
 
 def _default_hash(data: bytes | memoryview) -> ChunkHash:
     """Real SHA-256, used as ``FakeChunkHasher``'s default behavior."""
+
     return ChunkHash(algorithm=ChunkAlgorithm.SHA256, digest=hashlib.sha256(data).hexdigest())
 
 
@@ -250,7 +246,14 @@ class FakeChunkWriter(ChunkWriter):
         self.raise_on_write: Exception | None = None
 
     def write_chunk(self, destination: Path, chunk: Chunk) -> None:
-        """Record the write, unless configured to fail."""
+        """Record the write, unless configured to fail.
+
+        Args:
+            destination: Where to write the chunk's bytes.
+            chunk: The chunk to persist.
+        Raises:
+            raise_on_write: If configured to fail.
+        """
         if self.raise_on_write is not None:
             raise self.raise_on_write
         self.written[destination] = chunk
@@ -312,11 +315,11 @@ class FakeTrustedPeerRepository(TrustedPeerRepository):
         self._store: dict[str, bytes] = {}
 
     async def get_trusted_key(self, device_id: str) -> bytes | None:
-        """Return the pinned key for `device_id`, if any."""
+        """Return the pinned key for ``device_id``, if any."""
         return self._store.get(device_id)
 
     async def trust(self, device_id: str, public_key: bytes) -> None:
-        """Pin `public_key` as trusted for `device_id`."""
+        """Pin ``public_key`` as trusted for ``device_id``."""
         self._store[device_id] = public_key
 
 
@@ -324,7 +327,9 @@ class FakeManifestExchangeTransport(ManifestExchangeTransport):
     """In-memory fake ``ManifestExchangeTransport`` — no sockets, no encryption.
 
     Seed it with ``manifests[(device_id, relative_path)] = collection``
-    to control what a "peer" appears to have, and
+    to control what a ``peer`` appears to have, and
+    ``versions[(device_id, relative_path)] = version`` to control
+    the version vector, and
     ``chunks[(device_id, relative_path)] = [chunk, ...]`` to control
     what ``request_chunks`` can actually hand back.
     """
@@ -332,16 +337,21 @@ class FakeManifestExchangeTransport(ManifestExchangeTransport):
     def __init__(self) -> None:
         """Initialize with empty manifest and chunk maps."""
         self.manifests: dict[tuple[str, str], ChunkCollection] = {}
+        self.versions: dict[tuple[str, str], VersionVector] = {}
         self.chunks: dict[tuple[str, str], list[Chunk]] = {}
 
-    async def request_manifest(self, peer: Peer, relative_path: str) -> ChunkCollection | None:
-        """Return the seeded manifest for `(peer.device_id, relative_path)`, if any."""
-        return self.manifests.get((peer.device_id, relative_path))
+    async def request_manifest(self, peer: Peer, relative_path: str) -> ManifestWithVersion | None:
+        """Return the seeded manifest for ``(peer.device_id, relative_path)``, if any."""
+        collection = self.manifests.get((peer.device_id, relative_path))
+        if collection is None:
+            return None
+        version = self.versions.get((peer.device_id, relative_path))
+        return ManifestWithVersion(collection=collection, version=version)
 
     async def request_chunks(
         self, peer: Peer, relative_path: str, chunk_hashes: list[str]
     ) -> AsyncIterator[Chunk]:
-        """Yield the seeded chunks for `(peer.device_id, relative_path)` matching `chunk_hashes`."""
+        """Yield the seeded chunks for ``(peer.device_id, relative_path)`` matching ``chunk_hashes``."""
         for chunk in self.chunks.get((peer.device_id, relative_path), []):
             chunk_hash = chunk.metadata.chunk_hash
             if chunk_hash is not None and chunk_hash.digest in chunk_hashes:

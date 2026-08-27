@@ -5,6 +5,51 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Phase 17: Version-Aware Sync Direction
+- `domain/manifest_exchange.py`: added `ManifestWithVersion` dataclass
+  pairing a `ChunkCollection` with an optional `VersionVector`.
+  `ManifestExchangeTransport.request_manifest` return type changed from
+  `ChunkCollection | None` to `ManifestWithVersion | None`.
+- `domain/sync_direction.py` (new): `SyncDirection` enum (PUSH, PULL,
+  CONFLICT, NOOP), `SyncDirectionDecision` dataclass, and stateless
+  `SyncDirectionResolver` service that compares local vs. remote
+  `VersionVector` using Phase 7's happens-before/concurrent logic.
+  Falls back to content-hash comparison when the peer reports no version
+  (legacy/pre-Phase-7 peers).
+- `application/use_cases/sync_file.py`: added `sync()` method that
+  composes request manifest → resolve direction → push/pull/noop/conflict.
+  On CONFLICT, falls back to `LastWriterWinsStrategy` (Phase 7) instead
+  of crashing. Added `MergeStrategy` protocol and `LocalVersionProvider`
+  protocol. `push`/`pull` return `SyncFileResult` with optional
+  `direction` field.
+- `infrastructure/networking/tcp_manifest_exchange.py`: accepts optional
+  `metadata_lookup` parameter to resolve local `VersionVector` for
+  manifest responses. Response payload now includes `version` field
+  alongside `collection`.
+- `application/orchestration.py`: `_auto_push_known_files` now calls
+  `SyncFileUseCase.sync()` instead of `.push()`, so newly discovered
+  peers trigger direction-aware sync automatically.
+- `docs/adr/0024-version-aware-sync-direction.md`: full account of the
+  decision, including the msgpack type-stub regression lesson learned.
+
+### Changed — Phase 17
+- `FakeManifestExchangeTransport` (`tests/doubles.py`): updated to return
+  `ManifestWithVersion` instead of raw `ChunkCollection`. Added `versions`
+  dict for seeding version vectors in tests.
+- Existing tests updated: `test_tcp_manifest_exchange.py` accesses
+  `result.collection.chunks`; `test_orchestration.py` asserts
+  `.sync.assert_has_awaits` instead of `.push.assert_has_awaits`.
+- `TcpTransferTransport.send_chunk`/`request_chunks` key-lookup corrected:
+  now uses own device's `send_key`/`receive_key` instead of looking up
+  the peer's session (a pre-existing bug that surfaced during Phase 17
+  testing).
+
+### Added — Phase 16: Automatic Push on Peer Discovery (retroactive)
+- `application/orchestration.py`: `SyncOrchestrator._auto_push_known_files`
+  pushes every locally known, non-deleted file to a newly discovered peer
+  after `X25519Handshake` session establishment. Direction (push vs. pull)
+  deliberately left to Phase 17. See ADR-0023.
+
 ### Added — Phase 15: File Synchronization Use Case
 - `application/use_cases/sync_file.py` (new): `SyncFileUseCase` with
   explicit `push`/`pull` methods (deliberately not one automatic

@@ -19,6 +19,7 @@ import asyncio
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import structlog
 import typer
@@ -29,7 +30,7 @@ app = typer.Typer(help="SecureSync — encrypted peer-to-peer file synchronizati
 logger = structlog.get_logger(__name__)
 
 
-def _load_config() -> dict:
+def _load_config() -> dict[str, Any]:
     """Load the user's YAML config, returning an empty dict if missing."""
     config_paths = [
         Path.home() / ".securesync" / "config.yaml",
@@ -110,8 +111,8 @@ def init(
                                      help="Directory to store config and identity"),
 ) -> None:
     """Generate a new device identity and default config."""
-    from securesync.infrastructure.crypto.ed25519_identity_provider import Ed25519IdentityProvider
     from securesync.domain.identity import IdentityKeyPair
+    from securesync.infrastructure.crypto.ed25519_identity_provider import Ed25519IdentityProvider
 
     resolved = Path(storage_dir).expanduser()
     resolved.mkdir(parents=True, exist_ok=True)

@@ -14,6 +14,7 @@ from securesync.domain.networking import Peer, PeerAddress, PeerCapabilities, Pe
 from securesync.infrastructure.crypto.pyca_crypto import AesGcmCipher
 from securesync.infrastructure.networking.session_key_store import PeerSession, SessionKeyStore
 from securesync.infrastructure.networking.tcp_transport import TcpTransferTransport
+from securesync.infrastructure.networking.session_key_store import PeerSession, SessionKeyStore
 
 # A's send_key must equal B's receive_key and vice versa — the same
 # invariant a real X25519Handshake produces (see test_x25519_handshake.py).

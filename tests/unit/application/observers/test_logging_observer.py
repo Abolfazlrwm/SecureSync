@@ -20,10 +20,11 @@ class TestLoggingFileSystemEventObserver:
 
     async def test_logs_a_created_event(self) -> None:
         """A CREATED event is logged with the expected structured fields."""
+        src = Path("/watched/new.txt")
         observer = LoggingFileSystemEventObserver()
         event = FileSystemEvent(
             event_type=FileSystemEventType.CREATED,
-            src_path=Path("/watched/new.txt"),
+            src_path=src,
             is_directory=False,
         )
 
@@ -34,18 +35,20 @@ class TestLoggingFileSystemEventObserver:
         entry = captured[0]
         assert entry["event"] == "filesystem_event"
         assert entry["event_type"] == "created"
-        assert entry["path"] == "/watched/new.txt"
+        assert entry["path"] == str(src)
         assert entry["dest_path"] is None
         assert entry["is_directory"] is False
         assert entry["is_rename"] is False
 
     async def test_logs_a_moved_event_with_dest_path(self) -> None:
         """A MOVED event's log entry includes the destination path."""
+        src = Path("/watched/old.txt")
+        dest = Path("/watched/new.txt")
         observer = LoggingFileSystemEventObserver()
         event = FileSystemEvent(
             event_type=FileSystemEventType.MOVED,
-            src_path=Path("/watched/old.txt"),
-            dest_path=Path("/watched/new.txt"),
+            src_path=src,
+            dest_path=dest,
             is_directory=False,
         )
 
@@ -53,5 +56,5 @@ class TestLoggingFileSystemEventObserver:
             await observer.on_file_event(event)
 
         entry = captured[0]
-        assert entry["dest_path"] == "/watched/new.txt"
+        assert entry["dest_path"] == str(dest)
         assert entry["is_rename"] is True

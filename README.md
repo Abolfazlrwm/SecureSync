@@ -10,14 +10,14 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)]()
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-inspired-4baaaa.svg)](CODE_OF_CONDUCT.md)
-[![Status](https://img.shields.io/badge/status-Phase_10_%E2%80%94_production_runtime-green)]()
+[![Status](https://img.shields.io/badge/status-Phase_17_%E2%80%94_version_aware_sync-green)]()
 
 </div>
 
-> ✅ **Project status:** Phases 1 through 10 are fully implemented.
-> SecureSync now features a production-ready runtime, SQLite-backed
-> metadata storage, end-to-end encryption, and an orchestration layer
-> for automated peer-to-peer synchronization. See
+> ✅ **Project status:** Phases 0-17 are fully implemented.
+> SecureSync now features end-to-end encrypted peer-to-peer sync with
+> version-aware direction decisions, trust-on-first-use authentication,
+> and a working CLI. See
 > [ROADMAP.md](ROADMAP.md) for the implementation history.
 
 ---
@@ -71,13 +71,16 @@ flowchart LR
 - [x] Real-time filesystem watching (create/modify/delete/rename/move)
 - [x] Streaming, bounded-memory chunking + SHA-256 hashing
 - [x] Delta synchronization: content-hash comparison against a recorded baseline
-- [x] Peer discovery (mDNS)
-- [x] Streamed transfers with binary wire protocol
+- [x] Peer discovery (mDNS via zeroconf)
+- [x] TCP transfers with AEAD-encrypted binary wire protocol
 - [x] End-to-end encryption: X25519 key exchange, AES-256-GCM / ChaCha20-Poly1305
+- [x] Trust-on-first-use peer authentication (Ed25519 identity signing)
 - [x] Conflict resolution with version vectors and pluggable strategies
 - [x] SQLite-backed metadata store (files, chunks, version history)
 - [x] Synchronization Orchestrator with state machine and lifecycle control
-- [x] YAML + environment variable configuration and production bootstrap
+- [x] Version-aware sync direction (PUSH / PULL / CONFLICT / NOOP)
+- [x] CLI entry point (`securesync` init / config / peers / sync / pull / daemon)
+- [x] YAML configuration and production bootstrap with signal handling
 
 ## Installation
 
@@ -90,14 +93,37 @@ pip install -e ".[dev]"
 ## Quick Start
 
 ```bash
-# Start the synchronization engine with a config file
-python -m securesync.main config.yaml
+# Initialize a new device identity and default config
+securesync init --storage-dir ~/.securesync
+
+# Show current configuration (secrets redacted by default)
+securesync config
+
+# List known peers and their trust status
+securesync peers
+
+# Start the sync daemon (discovers peers, syncs automatically)
+securesync daemon
+
+# Push specific files/directories to all discovered peers
+securesync sync path/to/file.txt
+
+# Pull a file from a specific peer
+securesync pull path/to/file.txt --from <peer-device-id>
+
+# Reset trust for a peer (e.g. after a key rotation)
+securesync trust <peer-device-id>
 ```
 
 ## Configuration
 
-The YAML schema and environment variable overrides are fully documented in
-[docs/configuration.md](docs/configuration.md).
+The YAML configuration system is fully implemented. The schema and all
+available options are documented in
+[docs/configuration.md](docs/configuration.md). Key sections: `storage`
+(sync directory, database path, chunk size), `network` (handshake,
+transfer, and manifest ports), `device_id` (auto-generated if omitted),
+and `log_level` (default: `INFO`). See also
+[examples/config](examples/config) for working example files.
 
 ## Documentation
 

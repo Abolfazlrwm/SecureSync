@@ -89,7 +89,9 @@ async def bootstrap(config_path: str) -> None:
     # 2. Wire dependencies — every adapter here is a real implementation.
     metadata_repo = SqliteMetadataRepository(config.storage.database_path)
     await metadata_repo.connect()
-    storage_dir = Path(config.storage.database_path).resolve().parent
+    # One-off resolve() during startup bootstrap, not a hot loop — the
+    # anyio/trio Path this rule wants isn't worth a new dependency here.
+    storage_dir = Path(config.storage.database_path).resolve().parent  # noqa: ASYNC240
 
     identity_provider = Ed25519IdentityProvider(storage_dir)
     own_identity = identity_provider.load_or_create()

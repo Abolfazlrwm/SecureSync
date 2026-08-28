@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from dataclasses import dataclass
 from enum import StrEnum, unique
 from pathlib import Path
@@ -213,10 +214,8 @@ class SyncOrchestrator:
         out an in-progress poll interval before the loop notices it
         should exit.
         """
-        try:
+        with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(self._stop_event.wait(), timeout=seconds)
-        except TimeoutError:
-            pass
 
     async def handle_peer_discovered(self, peer: Peer) -> None:
         """React to a new peer being discovered.

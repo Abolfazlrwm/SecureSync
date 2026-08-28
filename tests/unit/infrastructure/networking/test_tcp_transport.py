@@ -14,7 +14,6 @@ from securesync.domain.networking import Peer, PeerAddress, PeerCapabilities, Pe
 from securesync.infrastructure.crypto.pyca_crypto import AesGcmCipher
 from securesync.infrastructure.networking.session_key_store import PeerSession, SessionKeyStore
 from securesync.infrastructure.networking.tcp_transport import TcpTransferTransport
-from securesync.infrastructure.networking.session_key_store import PeerSession, SessionKeyStore
 
 # A's send_key must equal B's receive_key and vice versa — the same
 # invariant a real X25519Handshake produces (see test_x25519_handshake.py).
@@ -38,8 +37,18 @@ def _session_keys(
 ) -> SessionKeyStore:
     """Build a SessionKeyStore where A sends with a_send and B receives with a_send."""
     store = SessionKeyStore()
-    store.put(a_id, PeerSession(send_key=a_send, receive_key=b_send, transfer_port=a_port, manifest_port=a_port))
-    store.put(b_id, PeerSession(send_key=b_send, receive_key=a_send, transfer_port=b_port, manifest_port=b_port))
+    store.put(
+        a_id,
+        PeerSession(
+            send_key=a_send, receive_key=b_send, transfer_port=a_port, manifest_port=a_port
+        ),
+    )
+    store.put(
+        b_id,
+        PeerSession(
+            send_key=b_send, receive_key=a_send, transfer_port=b_port, manifest_port=b_port
+        ),
+    )
     return store
 
 
@@ -49,8 +58,16 @@ def _session_keys_wrong(
 ) -> SessionKeyStore:
     """A sends KEY_1, B tries to decrypt with WRONG_KEY (should fail)."""
     store = SessionKeyStore()
-    store.put(a_id, PeerSession(send_key=KEY_1, receive_key=KEY_2, transfer_port=a_port, manifest_port=a_port))
-    store.put(b_id, PeerSession(send_key=KEY_2, receive_key=WRONG_KEY, transfer_port=b_port, manifest_port=b_port))
+    store.put(
+        a_id,
+        PeerSession(send_key=KEY_1, receive_key=KEY_2, transfer_port=a_port, manifest_port=a_port),
+    )
+    store.put(
+        b_id,
+        PeerSession(
+            send_key=KEY_2, receive_key=WRONG_KEY, transfer_port=b_port, manifest_port=b_port
+        ),
+    )
     return store
 
 

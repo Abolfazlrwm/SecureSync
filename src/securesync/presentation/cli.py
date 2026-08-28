@@ -92,6 +92,7 @@ def sync(
     """Push local files to all discovered peers."""
     if not paths:
         typer.echo("Syncing entire sync root...")
+        return
     for p in paths:
         typer.echo(f"  Would sync: {p}")
     typer.echo("NOTE: Automatic sync requires the daemon to be running.")

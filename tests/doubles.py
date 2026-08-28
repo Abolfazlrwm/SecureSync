@@ -351,7 +351,10 @@ class FakeManifestExchangeTransport(ManifestExchangeTransport):
     async def request_chunks(
         self, peer: Peer, relative_path: str, chunk_hashes: list[str]
     ) -> AsyncIterator[Chunk]:
-        """Yield the seeded chunks for ``(peer.device_id, relative_path)`` matching ``chunk_hashes``."""
+        """Yield the seeded chunks for ``(peer.device_id, relative_path)``.
+
+        Only chunks whose hash is in ``chunk_hashes`` are yielded.
+        """
         for chunk in self.chunks.get((peer.device_id, relative_path), []):
             chunk_hash = chunk.metadata.chunk_hash
             if chunk_hash is not None and chunk_hash.digest in chunk_hashes:

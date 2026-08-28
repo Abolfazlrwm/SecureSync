@@ -24,6 +24,7 @@ what this does and doesn't protect against.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import struct
 from typing import Any
@@ -174,10 +175,8 @@ class X25519Handshake:
             response = await self._read_message(reader)
         finally:
             writer.close()
-            try:
+            with contextlib.suppress(ConnectionError):
                 await writer.wait_closed()
-            except ConnectionError:
-                pass
 
         await self._verify_and_trust(response, salt + response["public_key"])
 
@@ -350,7 +349,5 @@ class HandshakeServer:
             logger.warning("handshake_failed", error=str(e), error_type=type(e).__name__)
         finally:
             writer.close()
-            try:
+            with contextlib.suppress(ConnectionError):
                 await writer.wait_closed()
-            except ConnectionError:
-                pass

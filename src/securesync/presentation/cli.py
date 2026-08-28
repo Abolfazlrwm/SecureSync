@@ -55,9 +55,8 @@ def config(
 
     # Redact sensitive fields by default
     redacted = dict(cfg)
-    if not show_keys:
-        if "device_id" in redacted:
-            redacted["device_id"] = redacted["device_id"][:4] + "..."
+    if not show_keys and "device_id" in redacted:
+        redacted["device_id"] = redacted["device_id"][:4] + "..."
 
     typer.echo(json.dumps(redacted, indent=2, default=str))
 
@@ -84,7 +83,11 @@ def peers() -> None:
 
 @app.command()
 def sync(
-    paths: list[str] = typer.Argument(None, help="Files or directories to sync (default: entire sync root)"),
+    # typer's documented pattern requires the Argument() call here, in
+    # default-argument position — it's how typer discovers the CLI spec.
+    paths: list[str] = typer.Argument(  # noqa: B008
+        None, help="Files or directories to sync (default: entire sync root)"
+    ),
 ) -> None:
     """Push local files to all discovered peers."""
     if not paths:
@@ -97,7 +100,7 @@ def sync(
 
 @app.command()
 def pull(
-    paths: list[str] = typer.Argument(..., help="Files to pull from a peer"),
+    paths: list[str] = typer.Argument(..., help="Files to pull from a peer"),  # noqa: B008
     from_device: str = typer.Option(None, "--from", help="Specific peer device ID"),
 ) -> None:
     """Pull files from a peer."""

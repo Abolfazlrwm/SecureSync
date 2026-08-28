@@ -16,6 +16,7 @@ deliberately leaves for later.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import struct
 from collections.abc import AsyncIterator
@@ -118,10 +119,8 @@ class TcpTransferTransport(TransferTransport):
             logger.warning("tcp_transport_connection_dropped", error=str(e))
         finally:
             writer.close()
-            try:
+            with contextlib.suppress(ConnectionError):
                 await writer.wait_closed()
-            except ConnectionError:
-                pass
 
     async def send_chunk(self, peer: Peer, chunk: Chunk) -> None:
         """Encrypt a chunk and send it to a peer over a short-lived TCP connection.
@@ -164,10 +163,8 @@ class TcpTransferTransport(TransferTransport):
             await writer.drain()
         finally:
             writer.close()
-            try:
+            with contextlib.suppress(ConnectionError):
                 await writer.wait_closed()
-            except ConnectionError:
-                pass
         logger.info("chunk_sent_tcp", peer=peer.device_id, chunk_id=chunk.metadata.chunk_id)
 
     async def request_chunks(self, peer: Peer, chunk_hashes: list[str]) -> AsyncIterator[Chunk]:
@@ -192,7 +189,9 @@ class TcpTransferTransport(TransferTransport):
             envelope = await self._inbox.get()
             encrypted = self._unpack_envelope(envelope)
             framed = self._cipher.decrypt(
-                encrypted, own_session.receive_key, associated_data=self._own_device_id.encode("utf-8")
+                encrypted,
+                own_session.receive_key,
+                associated_data=self._own_device_id.encode("utf-8"),
             )
             packet = Packet.decode(framed)
             digest = packet.payload.get("hash_digest")

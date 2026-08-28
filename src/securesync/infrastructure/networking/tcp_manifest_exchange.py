@@ -22,6 +22,7 @@ to content-hash-only diffing. See
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import struct
 from collections.abc import AsyncIterator
@@ -183,10 +184,8 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
             response = await self._read_message(reader)
         finally:
             writer.close()
-            try:
+            with contextlib.suppress(ConnectionError):
                 await writer.wait_closed()
-            except ConnectionError:
-                pass
 
         response_encrypted = self._unpack_envelope(response["envelope"])
         associated_data = self._own_device_id.encode("utf-8")
@@ -241,10 +240,8 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
             response = await self._read_message(reader)
         finally:
             writer.close()
-            try:
+            with contextlib.suppress(ConnectionError):
                 await writer.wait_closed()
-            except ConnectionError:
-                pass
 
         response_encrypted = self._unpack_envelope(response["envelope"])
         associated_data = self._own_device_id.encode("utf-8")
@@ -292,10 +289,8 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
             logger.warning("manifest_exchange_request_failed", error=str(e))
         finally:
             writer.close()
-            try:
+            with contextlib.suppress(ConnectionError):
                 await writer.wait_closed()
-            except ConnectionError:
-                pass
 
     async def _build_manifest_response(self, request_payload: dict[str, Any]) -> dict[str, Any]:
         """Look up the requested file's manifest + version and build a response payload."""

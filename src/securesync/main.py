@@ -165,9 +165,28 @@ async def bootstrap(config_path: str) -> None:
     )
 
     # 4. Handle signals.
+    #
+    # asyncio's loop.add_signal_handler() isn't implemented on Windows
+    # (see https://docs.python.org/3/library/asyncio-platforms.html) —
+    # it raises NotImplementedError immediately, which used to crash
+    # bootstrap() at this exact line on every Windows run. Fall back to
+    # signal.signal() there: it can't interrupt the loop mid-await the
+    # way add_signal_handler can, but a Ctrl+C still raises
+    # KeyboardInterrupt into asyncio.run() on Windows, which
+    # presentation/cli.py's `daemon` command already catches — so
+    # graceful shutdown still works, it just takes the KeyboardInterrupt
+    # path there instead of orchestrator.stop() here.
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, lambda: asyncio.create_task(orchestrator.stop()))
+        try:
+            loop.add_signal_handler(sig, lambda: asyncio.create_task(orchestrator.stop()))
+        except NotImplementedError:
+            logger.warning(
+                "signal_handler_unsupported",
+                signal=sig.name,
+                note="platform doesn't support loop.add_signal_handler (e.g. Windows); "
+                "relying on KeyboardInterrupt for graceful shutdown instead",
+            )
 
     # 5. Start the orchestrator and run until stopped.
     try:

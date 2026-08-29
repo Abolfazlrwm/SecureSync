@@ -198,6 +198,23 @@ Status is updated at the end of every phase alongside `CHANGELOG.md`.
       Also fixed: `TcpTransferTransport` send/receive key-lookup bug
       (was looking up peer's session instead of own). See ADR-0024.
 
+- [x] **Phase 20 — End-to-End Sync Verification**
+      The first test running two fully bootstrapped, independent
+      instances of the real application and confirming a file
+      created on one reaches the other. It immediately found three
+      real bugs unit tests couldn't see: `main.py` never actually
+      constructed or wired `SyncFileUseCase` into `SyncOrchestrator`
+      (the entire Phase 15-17 pipeline was built, tested, and never
+      used by the running app); `TcpTransferTransport` looked up
+      session keys under this device's own ID instead of the peer's;
+      and `send_chunk` connected to the peer's handshake port instead
+      of its negotiated transfer port. All three fixed. Also
+      documents a real, deliberately-unfixed gap: nothing yet
+      autonomously drains and reconstructs an unsolicited inbound
+      push on the receiving side (`pull`, which uses a proper
+      request/response RPC, doesn't have this problem). See
+      ADR-0025.
+      
 ## Advanced features (introduced opportunistically, in the phase they fit)
 
 Custom binary protocol · plugin system · event bus · job scheduler ·

@@ -149,14 +149,23 @@ class TcpTransferTransport(TransferTransport):
         framed = Packet(header=header, payload=payload).encode()
 
         nonce = os.urandom(NONCE_SIZE)
-        own_session = self._session_keys.get(self._own_device_id)
+        # SessionKeyStore is always populated keyed by the *other*
+        # side's device_id (see X25519SessionCoordinator.ensure_session
+        # and main.py's _drain_inbound_handshakes, both of which call
+        # `session_keys.put(result.peer_device_id, ...)`), so the
+        # lookup here must use `peer.device_id`, not our own — looking
+        # ourselves up here would only coincidentally work if we ever
+        # had a peer whose device_id equaled our own, which never
+        # happens in practice, so this silently failed on every real
+        # multi-peer send until this fix.
+        own_session = self._session_keys.get(peer.device_id)
         encrypted = self._cipher.encrypt(
             framed, own_session.send_key, nonce, associated_data=peer.device_id.encode("utf-8")
         )
         envelope = self._pack_envelope(encrypted)
 
         reader, writer = await asyncio.open_connection(
-            peer.address.ip_address, peer.address.port
+            peer.address.ip_address, own_session.transfer_port
         )
         try:
             writer.write(struct.pack(_LENGTH_PREFIX_FORMAT, len(envelope)) + envelope)
@@ -184,7 +193,9 @@ class TcpTransferTransport(TransferTransport):
             NoSessionKeyError: If no handshake has completed for `peer` yet.
         """
         remaining = set(chunk_hashes)
-        own_session = self._session_keys.get(self._own_device_id)
+        # Same fix as `send_chunk` above: the store is keyed by the
+        # peer's device_id, not our own.
+        own_session = self._session_keys.get(peer.device_id)
         while remaining:
             envelope = await self._inbox.get()
             encrypted = self._unpack_envelope(envelope)

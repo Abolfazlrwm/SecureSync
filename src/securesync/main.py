@@ -6,18 +6,29 @@ import signal
 import socket
 import sys
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 import structlog
 
 from securesync.application.orchestration import SyncOrchestrator
+from securesync.application.use_cases.calculate_chunk_hashes import CalculateChunkHashesUseCase
+from securesync.application.use_cases.chunk_file import ChunkFileUseCase
 from securesync.application.use_cases.conflict_resolution import DetectConflictUseCase
 from securesync.application.use_cases.discover_peers import DiscoverPeersUseCase
+from securesync.application.use_cases.sync_file import SyncFileUseCase
 from securesync.application.use_cases.transfer_chunks import (
     DownloadChunksUseCase,
     UploadChunksUseCase,
 )
+from securesync.domain.sync_direction import SyncDirectionResolver
 from securesync.infrastructure.chunking.file_chunk_repository import FileChunkRepository
+from securesync.infrastructure.chunking.local_file_reconstructor import LocalFileReconstructor
+from securesync.infrastructure.chunking.sha256_hash_provider import SHA256HashProvider
+from securesync.infrastructure.chunking.streaming_chunk_reader import (
+    FixedSizeChunkingStrategy,
+    StreamingChunkReader,
+)
 from securesync.infrastructure.config.yaml_config_loader import YamlConfigLoader
 from securesync.infrastructure.crypto.ed25519_identity_provider import Ed25519IdentityProvider
 from securesync.infrastructure.crypto.pyca_crypto import (
@@ -73,11 +84,21 @@ async def _drain_inbound_handshakes(
         )
 
 
-async def bootstrap(config_path: str) -> None:
+async def bootstrap(
+    config_path: str, *, on_ready: Callable[[SyncOrchestrator], None] | None = None
+) -> None:
     """Initialize and start the application.
 
     Args:
         config_path: Path to the YAML configuration file.
+        on_ready: Optional hook called with the fully-wired
+            `SyncOrchestrator` right after construction, before
+            `start()`/`wait_until_stopped()` block this coroutine.
+            Not used in normal operation (`__main__` never passes
+            one) — it exists so tests can obtain a handle to a real,
+            fully-wired orchestrator (e.g. to call
+            `handle_peer_discovered` directly) without needing a real
+            mDNS network to trigger discovery. Must not block.
     """
     logger.info("application_bootstrap_started", config_path=config_path)
 
@@ -152,8 +173,29 @@ async def bootstrap(config_path: str) -> None:
         session_keys,
         chunk_repository,
         Path(config.storage.sync_directory),
+        metadata_lookup=metadata_repo,
     )
     await manifest_exchange.start()
+
+    # The Phase 15-17 file-sync pipeline (manifest exchange + delta +
+    # transfer + version-aware direction) was built and tested in
+    # isolation but was never actually wired in here, which meant
+    # SyncOrchestrator's auto-push-on-discovery (ADR-0023/0024) was a
+    # silent no-op in every real run: `_auto_push_known_files` returns
+    # immediately whenever `sync_file_use_case` is `None`. This wiring
+    # is what makes peer discovery actually result in files moving.
+    sync_file_use_case = SyncFileUseCase(
+        manifest_exchange=manifest_exchange,
+        chunk_file_use_case=ChunkFileUseCase(StreamingChunkReader(), SHA256HashProvider()),
+        calculate_hashes_use_case=CalculateChunkHashesUseCase(
+            StreamingChunkReader(), SHA256HashProvider()
+        ),
+        upload_use_case=upload_use_case,
+        chunk_repository=chunk_repository,
+        file_reconstructor=LocalFileReconstructor(),
+        direction_resolver=SyncDirectionResolver(),
+    )
+    chunking_strategy = FixedSizeChunkingStrategy(chunk_size=config.storage.chunk_size)
 
     orchestrator = SyncOrchestrator(
         metadata_repo=metadata_repo,
@@ -162,7 +204,14 @@ async def bootstrap(config_path: str) -> None:
         download_use_case=download_use_case,
         upload_use_case=upload_use_case,
         session_coordinator=session_coordinator,
+        sync_file_use_case=sync_file_use_case,
+        sync_root=Path(config.storage.sync_directory),
+        chunking_strategy=chunking_strategy,
+        chunk_size=config.storage.chunk_size,
     )
+
+    if on_ready is not None:
+        on_ready(orchestrator)
 
     # 4. Handle signals.
     #

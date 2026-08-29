@@ -35,18 +35,33 @@ def _session_keys(
     b_id: str, b_port: int,
     a_send: bytes = KEY_1, b_send: bytes = KEY_2,
 ) -> SessionKeyStore:
-    """Build a SessionKeyStore where A sends with a_send and B receives with a_send."""
+    """Build a shared SessionKeyStore for two transports sharing one store.
+
+    In production each device has its *own* `SessionKeyStore`, keyed by
+    the *peer's* device_id, holding that device's own (send_key,
+    receive_key) pair for talking to that specific peer (see
+    `X25519SessionCoordinator.ensure_session` and `main.py`'s
+    `_drain_inbound_handshakes` — both call
+    `session_keys.put(result.peer_device_id, ...)`).
+
+    Since this test shares one `SessionKeyStore` object between both
+    sides for convenience, the entry *transport_a* will look up (keyed
+    by peer B's id) must hold *A's own* keys, and the entry
+    *transport_b* looks up (keyed by peer A's id) must hold *B's own*
+    keys — i.e. each entry is stored under the *other* side's id, not
+    its own.
+    """
     store = SessionKeyStore()
     store.put(
-        a_id,
+        b_id,  # transport_a looks this up when sending to/receiving from B
         PeerSession(
-            send_key=a_send, receive_key=b_send, transfer_port=a_port, manifest_port=a_port
+            send_key=a_send, receive_key=b_send, transfer_port=b_port, manifest_port=b_port
         ),
     )
     store.put(
-        b_id,
+        a_id,  # transport_b looks this up when sending to/receiving from A
         PeerSession(
-            send_key=b_send, receive_key=a_send, transfer_port=b_port, manifest_port=b_port
+            send_key=b_send, receive_key=a_send, transfer_port=a_port, manifest_port=a_port
         ),
     )
     return store
@@ -56,16 +71,16 @@ def _session_keys_wrong(
     a_id: str, a_port: int,
     b_id: str, b_port: int,
 ) -> SessionKeyStore:
-    """A sends KEY_1, B tries to decrypt with WRONG_KEY (should fail)."""
+    """A encrypts with KEY_1; B's own receive_key is WRONG_KEY (should fail)."""
     store = SessionKeyStore()
     store.put(
-        a_id,
-        PeerSession(send_key=KEY_1, receive_key=KEY_2, transfer_port=a_port, manifest_port=a_port),
+        b_id,  # A's own session for peer B: A sends with KEY_1.
+        PeerSession(send_key=KEY_1, receive_key=KEY_2, transfer_port=b_port, manifest_port=b_port),
     )
     store.put(
-        b_id,
+        a_id,  # B's own session for peer A: B (wrongly) receives with WRONG_KEY.
         PeerSession(
-            send_key=KEY_2, receive_key=WRONG_KEY, transfer_port=b_port, manifest_port=b_port
+            send_key=KEY_2, receive_key=WRONG_KEY, transfer_port=a_port, manifest_port=a_port
         ),
     )
     return store

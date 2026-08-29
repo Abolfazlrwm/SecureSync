@@ -132,6 +132,30 @@ class SyncOrchestrator:
         """A snapshot of the current session's aggregated metrics."""
         return self._stats
 
+    @property
+    def metadata_repo(self) -> MetadataRepository:
+        """The metadata repository this orchestrator was built with.
+
+        Exposed so a caller that already holds the orchestrator (e.g.
+        `main.py`'s `on_ready` test hook) doesn't need to separately
+        thread the same repository through as well.
+        """
+        return self._metadata_repo
+
+    @property
+    def download_use_case(self) -> DownloadChunksUseCase | None:
+        """The configured `DownloadChunksUseCase`, or `None` if none was wired.
+
+        Exposed for the same reason as `metadata_repo` — see there.
+        Currently the only consumer is the Phase 20 end-to-end test,
+        which uses it to drain a peer's pushed chunk out of this
+        device's transport inbox: nothing in `SyncOrchestrator` itself
+        does this automatically yet for an unsolicited inbound push
+        (see docs/adr/0025-end-to-end-sync-verification.md's
+        "known gap" section).
+        """
+        return self._download_use_case
+
     async def start(self) -> None:
         """Start the synchronization engine, including real peer discovery."""
         if self._state != SyncState.IDLE:

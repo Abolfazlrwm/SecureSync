@@ -5,7 +5,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — Phase 20: End-to-End Sync Verification
+
+- `main.py`: `bootstrap()` now constructs and wires `SyncFileUseCase`
+  (with `SyncDirectionResolver`) into `SyncOrchestrator`, along with
+  `sync_root` and a `FixedSizeChunkingStrategy`. Previously
+  `_auto_push_known_files` silently no-op'd on every real run.
+- `TcpTransferTransport.send_chunk`/`request_chunks`: fixed session
+  lookup to use `peer.device_id` (matching how sessions are always
+  stored) instead of the device's own ID.
+- `TcpTransferTransport.send_chunk`: now connects to the peer's
+  negotiated transfer port (`own_session.transfer_port`) instead of
+  its handshake port.
+- `SyncOrchestrator`: added `metadata_repo` and `download_use_case`
+  read-only properties.
+
+### Added — Phase 20
+
+- `tests/integration/test_end_to_end_sync.py`: two real bootstrapped
+  instances, real crypto, real TCP, verifying a pushed file's bytes
+  round-trip correctly.
+- `docs/adr/0025-end-to-end-sync-verification.md`.
+
 ### Added — Phase 17: Version-Aware Sync Direction
+
 - `domain/manifest_exchange.py`: added `ManifestWithVersion` dataclass
   pairing a `ChunkCollection` with an optional `VersionVector`.
   `ManifestExchangeTransport.request_manifest` return type changed from
@@ -33,6 +56,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   decision, including the msgpack type-stub regression lesson learned.
 
 ### Changed — Phase 17
+
 - `FakeManifestExchangeTransport` (`tests/doubles.py`): updated to return
   `ManifestWithVersion` instead of raw `ChunkCollection`. Added `versions`
   dict for seeding version vectors in tests.
@@ -45,12 +69,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   testing).
 
 ### Added — Phase 16: Automatic Push on Peer Discovery (retroactive)
+
 - `application/orchestration.py`: `SyncOrchestrator._auto_push_known_files`
   pushes every locally known, non-deleted file to a newly discovered peer
   after `X25519Handshake` session establishment. Direction (push vs. pull)
   deliberately left to Phase 17. See ADR-0023.
 
 ### Added — Phase 15: File Synchronization Use Case
+
 - `application/use_cases/sync_file.py` (new): `SyncFileUseCase` with
   explicit `push`/`pull` methods (deliberately not one automatic
   bidirectional method — see below). Composes manifest exchange,
@@ -59,30 +85,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Three real bugs found and fixed while verifying this against two
   real peer processes (not found by inspection — each reproduced with
   an actual two-device test scenario):
-  - Syncing a file that doesn't exist locally yet (the normal "first
-    pull" case) crashed with `ChunkSourceNotFoundError`. Fixed:
-    treated as an empty local manifest, not an error.
-  - `ManifestExchangeTransport` originally identified files by
-    absolute path — invisible across two peers whose sync
-    directories live at different absolute locations. Fixed: every
-    cross-peer file reference (`request_manifest`, the new
-    `request_chunks`, `SyncFileUseCase`'s own parameters) now uses a
-    path relative to each side's own sync root.
-    `TcpManifestExchangeTransport` gained a `sync_root` constructor
-    parameter to resolve a peer's relative request back to this
-    device's own absolute path.
-  - An automatic-bidirectional first version of this use case
-    silently overwrote a device's own fresh edit with a peer's stale
-    copy of the same chunk — verified with an actual round-trip test
-    that ended in mismatched file contents. Root cause: without a
-    timestamp or version signal, a pure content-hash diff can't tell
-    "new content the peer needs" apart from "stale content the peer
-    has already moved past." Fixed by making `push` and `pull`
-    separate, explicit-direction methods instead of attempting
-    automatic reconciliation — removing the ambiguity rather than
-    patching around it (a heuristic guard was tried first and found
-    insufficient — the same ambiguity corrupted the upload decision
-    too, not just download).
+    - Syncing a file that doesn't exist locally yet (the normal "first
+      pull" case) crashed with `ChunkSourceNotFoundError`. Fixed:
+      treated as an empty local manifest, not an error.
+    - `ManifestExchangeTransport` originally identified files by
+      absolute path — invisible across two peers whose sync
+      directories live at different absolute locations. Fixed: every
+      cross-peer file reference (`request_manifest`, the new
+      `request_chunks`, `SyncFileUseCase`'s own parameters) now uses a
+      path relative to each side's own sync root.
+      `TcpManifestExchangeTransport` gained a `sync_root` constructor
+      parameter to resolve a peer's relative request back to this
+      device's own absolute path.
+    - An automatic-bidirectional first version of this use case
+      silently overwrote a device's own fresh edit with a peer's stale
+      copy of the same chunk — verified with an actual round-trip test
+      that ended in mismatched file contents. Root cause: without a
+      timestamp or version signal, a pure content-hash diff can't tell
+      "new content the peer needs" apart from "stale content the peer
+      has already moved past." Fixed by making `push` and `pull`
+      separate, explicit-direction methods instead of attempting
+      automatic reconciliation — removing the ambiguity rather than
+      patching around it (a heuristic guard was tried first and found
+      insufficient — the same ambiguity corrupted the upload decision
+      too, not just download).
 - `domain/manifest_exchange.py`, `infrastructure/networking/tcp_manifest_exchange.py`:
   added a genuine `request_chunks(peer, relative_path, chunk_hashes)`
   pull — the requester actively asks, the responder reads the exact
@@ -118,6 +144,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `ROADMAP.md`: added a **Phase 15** entry.
 
 ### Added — Phase 14: Manifest Exchange Protocol
+
 - `domain/manifest_exchange.py` (new): `ManifestExchangeTransport`
   port — `request_manifest(peer, source_path) -> ChunkCollection | None`.
 - `infrastructure/networking/tcp_manifest_exchange.py` (new):
@@ -158,6 +185,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   loop as the next explicit step.
 
 ### Added — Phase 13: Peer Authentication and Full main.py Wiring
+
 - `domain/identity.py` (new): `IdentityKeyPair`, `IdentityProvider`
   (load/create a persistent identity, sign, verify), and
   `TrustedPeerRepository` (pin/check a peer's long-term public key).
@@ -177,7 +205,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   message is now signed with the sender's persistent Ed25519 identity
   and verified against `TrustedPeerRepository` (trust-on-first-use).
   Verified end to end: a genuine repeat handshake with the same
-  identity succeeds; an impostor presenting a *different* identity for
+  identity succeeds; an impostor presenting a _different_ identity for
   an already-trusted `device_id` is rejected (`HandshakeServer`
   publishes no result for it). See ADR-0019.
 - `infrastructure/networking/session_key_store.py` (new):
@@ -237,6 +265,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   both marked resolved there.
 
 ### Added — Phase 12: Key Exchange Handshake
+
 - `infrastructure/networking/x25519_handshake.py` (new):
   `X25519Handshake` (initiator/responder halves of a real X25519
   exchange over TCP) and `HandshakeServer` (accepts inbound
@@ -272,6 +301,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   disclosed follow-ups named.
 
 ### Added — Phase 11: Real Network Transport (partial — not yet wired into main.py)
+
 - `infrastructure/networking/tcp_transport.py` (new): `TcpTransferTransport` —
   a real `TransferTransport` implementation over `asyncio` TCP
   sockets. `start()`/`stop()` open and close a real listening socket;
@@ -298,9 +328,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the handshake as the specific remaining prerequisite.
 
 ### Fixed — Phase 10.5: Real Integration (post-hoc audit)
+
 - `core/protocol.py`: `Packet.encode()` never actually computed a
-  CRC32 (comment: *"In a real implementation, CRC would be calculated
-  here"*) — it now computes a real CRC32 and the correct
+  CRC32 (comment: _"In a real implementation, CRC would be calculated
+  here"_) — it now computes a real CRC32 and the correct
   `payload_length` from the actual serialized payload. Added
   `Packet.decode()` (didn't exist before), which raises the new
   `PayloadIntegrityError` on a CRC mismatch or truncated payload, and
@@ -329,8 +360,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   crypto layer to chunk transfer — previously, nothing did.
 - `application/orchestration.py`: `SyncOrchestrator`'s constructor
   never called any of its four injected use cases outside `__init__`;
-  the sync loop only slept (comment: *"In a real implementation, this
-  would react to events"*). `start()`/`stop()` now call
+  the sync loop only slept (comment: _"In a real implementation, this
+  would react to events"_). `start()`/`stop()` now call
   `discovery_use_case.start()`/`.stop()` for real. The loop polls the
   new `DiscoverPeersUseCase.list_online_peers()` every 5 seconds and
   reacts via `handle_peer_discovered`, which now reads
@@ -345,8 +376,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   plain `asyncio.sleep`). Verified: 7 tests, including one asserting
   `stop()` completes in under 1 second.
 - `main.py`: removed the hand-rolled `MagicMock` class and all four
-  `# type: ignore[arg-type]` comments (comment: *"Mocks for
-  demonstration in this phase"*). Now wires real adapters —
+  `# type: ignore[arg-type]` comments (comment: _"Mocks for
+  demonstration in this phase"_). Now wires real adapters —
   `MdnsDiscoveryService` + `InMemoryPeerRepository` for discovery,
   `InMemoryConflictRepository` for conflict detection — everywhere a
   real one exists. `download_use_case`/`upload_use_case` are left
@@ -372,6 +403,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (added `list_online_peers` coverage).
 
 ### Fixed — Phase 4-10 code-quality audit
+
 - `infrastructure/crypto/pyca_crypto.py`: added Google-style
   docstrings to all 7 previously-undocumented public methods across
   `PycaKeyExchangeProvider`, `PycaSessionKeyProvider`, `AesGcmCipher`,
@@ -388,6 +420,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   test.
 
 ### Added — Phase 10: Production Runtime
+
 - `domain/config.py`: Defined `Configuration`, `StorageConfig`, `NetworkConfig`, and `RuntimeProfile` entities.
 - `infrastructure/config/yaml_config_loader.py`: Implemented YAML configuration loading with `PyYAML`.
 - `main.py`: Created the application bootstrap process, dependency injection wiring, and signal handling for graceful shutdown.
@@ -395,12 +428,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Unit tests for configuration loading and validation.
 
 ### Added — Phase 9: Synchronization Orchestrator
+
 - `application/orchestration.py`: Implemented `SyncOrchestrator` to coordinate discovery, transfer, metadata, and conflict resolution.
 - `SyncState` machine and `SyncStats` for monitoring synchronization health and progress.
 - `docs/adr/0014-synchronization-orchestrator-state-machine.md`: Documented the orchestration and state management design.
 - Unit tests for the orchestrator lifecycle and event handling.
 
 ### Added — Phase 8: Metadata Database
+
 - `domain/metadata.py`: Defined the `MetadataRepository` port and `FileMetadata` entity.
 - `infrastructure/metadata/sqlite_metadata_repository.py`: Implemented a production-grade SQLite backend using `aiosqlite`.
 - Relational schema for files and chunks with foreign key integrity and transactional support.
@@ -408,6 +443,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Unit tests for SQLite persistence, including chunk mapping and file metadata retrieval.
 
 ### Added — Phase 7: Conflict Resolution
+
 - `domain/conflict.py`: Introduced `VersionVector` for causal tracking, `ConflictMetadata`, and `ConflictRepository` port.
 - `application/use_cases/conflict_resolution.py`: Implemented `DetectConflictUseCase` and `ResolveConflictUseCase` with pluggable `MergeStrategy`.
 - `LastWriterWinsStrategy` for automatic conflict resolution.
@@ -415,18 +451,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Unit tests for version vector arithmetic (increment, merge, comparison) and conflict detection/resolution use cases.
 
 ### Added — Phase 6: End-to-End Encryption
+
 - `domain/crypto.py`: Defined `KeyExchangeProvider`, `SessionKeyProvider`, and `AeadCipher` ports.
 - `infrastructure/crypto/pyca_crypto.py`: Implemented `cryptography.io` adapters for X25519, HKDF, AES-256-GCM, and ChaCha20-Poly1305.
 - `docs/adr/0011-peer-discovery-with-mdns-and-in-memory-repo.md`: Combined ADR for networking and crypto decisions.
 - Full unit tests for key exchange, session key derivation, and both AEAD ciphers.
 
 ### Added — Phase 5: Transfer Engine
+
 - `core/protocol.py`: Implemented the binary wire protocol with a 32-byte header and MessagePack payload.
 - `domain/transfer.py`: Defined `TransferTransport` and `TransferSession` ports.
 - `application/use_cases/transfer_chunks.py`: Created `UploadChunksUseCase` and `DownloadChunksUseCase` for orchestrating data transfer.
 - Unit tests for protocol serialization and transfer use cases.
 
 ### Added — Phase 4: Peer Discovery
+
 - `domain/networking.py`: Introduced `Peer`, `PeerIdentity`, `PeerAddress`, and `PeerCapabilities` entities, plus `DiscoveryService` and `PeerRepository` ports.
 - `infrastructure/networking/mdns_discovery.py`: Implemented mDNS discovery using the `zeroconf` library.
 - `infrastructure/networking/in_memory_peer_repository.py`: Created a thread-safe in-memory peer cache.
@@ -434,15 +473,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Unit tests for discovery, repository, and peer tracking.
 
 ### Documented — Phase 3.5: Persistent Manifest Repository (retroactive, no code change)
+
 - Documented that `ChunkRepository`/`FileChunkRepository` already provided persistent manifest storage.
 - Added `docs/adr/0010-persistent-manifest-storage-is-chunk-repository.md`.
 
 ### Added — Phase 3: Delta Synchronization
+
 - `domain/delta.py`: `DeltaCalculator` for content-hash comparison.
 - `application/use_cases/compute_delta.py`: `ComputeDeltaUseCase` for identifying chunks to transfer.
 
 ### Added — Phase 2: Chunk Engine
+
 - Streaming, bounded-memory file chunking and SHA-256 hashing.
 
 ### Added — Phase 1: Filesystem Watcher
+
 - Real-time filesystem monitoring using `watchdog`.

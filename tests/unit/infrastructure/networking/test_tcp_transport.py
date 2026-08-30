@@ -10,6 +10,7 @@ from securesync.application.use_cases.transfer_chunks import (
     UploadChunksUseCase,
 )
 from securesync.domain.chunk import Chunk, ChunkAlgorithm, ChunkHash, ChunkMetadata
+from securesync.domain.conflict import VersionVector
 from securesync.domain.networking import Peer, PeerAddress, PeerCapabilities, PeerIdentity
 from securesync.infrastructure.crypto.pyca_crypto import AesGcmCipher
 from securesync.infrastructure.networking.session_key_store import PeerSession, SessionKeyStore
@@ -109,7 +110,9 @@ class TestSendAndRequestChunksOverRealSockets:
         await transport_b.start()
         try:
             chunk = _chunk("c1", b"hello world", "a" * 64)
-            await transport_a.send_chunk(_peer("dev-b", 19302), chunk)
+            await transport_a.send_chunk(
+                _peer("dev-b", 19302), chunk, relative_path="f.txt", total_chunks=1
+            )
 
             received = [
                 c async for c in transport_b.request_chunks(_peer("dev-a", 19301), ["a" * 64])
@@ -131,8 +134,14 @@ class TestSendAndRequestChunksOverRealSockets:
         await transport_a.start()
         await transport_b.start()
         try:
-            await transport_a.send_chunk(_peer("dev-b", 19304), _chunk("c1", b"abc", "a" * 64))
-            await transport_b.send_chunk(_peer("dev-a", 19303), _chunk("c2", b"def", "b" * 64))
+            await transport_a.send_chunk(
+                _peer("dev-b", 19304), _chunk("c1", b"abc", "a" * 64),
+                relative_path="f.txt", total_chunks=1,
+            )
+            await transport_b.send_chunk(
+                _peer("dev-a", 19303), _chunk("c2", b"def", "b" * 64),
+                relative_path="g.txt", total_chunks=1,
+            )
 
             b_received = [
                 c async for c in transport_b.request_chunks(_peer("dev-a", 19303), ["a" * 64])
@@ -157,7 +166,8 @@ class TestSendAndRequestChunksOverRealSockets:
         await transport_b.start()
         try:
             await transport_a.send_chunk(
-                _peer("dev-b", 19306), _chunk("c1", b"secret", "a" * 64)
+                _peer("dev-b", 19306), _chunk("c1", b"secret", "a" * 64),
+                relative_path="f.txt", total_chunks=1,
             )
 
             with pytest.raises(InvalidTag):
@@ -186,7 +196,9 @@ class TestAgainstRealUseCases:
                 yield _chunk("c1", b"abc", "a" * 64)
                 yield _chunk("c2", b"def", "b" * 64)
 
-            await upload.execute(_peer("dev-b", 19308), chunks_to_send())
+            await upload.execute(
+                _peer("dev-b", 19308), chunks_to_send(), relative_path="f.txt", total_chunks=2
+            )
             received = [
                 c
                 async for c in download.execute(
@@ -195,6 +207,74 @@ class TestAgainstRealUseCases:
             ]
 
             assert [c.data for c in received] == [b"abc", b"def"]
+        finally:
+            await transport_a.stop()
+            await transport_b.stop()
+
+
+class TestReceivePushesOverRealSockets:
+    """Tests for the autonomous-push-reception side (ADR-0026)."""
+
+    async def test_receive_pushes_yields_relative_path_and_version(self) -> None:
+        cipher = AesGcmCipher()
+        keys = _session_keys("dev-a", 19309, "dev-b", 19310)
+        transport_a = TcpTransferTransport("dev-a", "127.0.0.1", 19309, cipher, keys)
+        transport_b = TcpTransferTransport("dev-b", "127.0.0.1", 19310, cipher, keys)
+        await transport_a.start()
+        await transport_b.start()
+        try:
+            await transport_a.send_chunk(
+                _peer("dev-b", 19310),
+                _chunk("c1", b"hello", "a" * 64),
+                relative_path="f.txt",
+                total_chunks=1,
+                version_vector=VersionVector({"dev-a": 2}),
+            )
+
+            received = []
+            async for push in transport_b.receive_pushes():
+                received.append(push)
+                break
+
+            assert received[0].relative_path == "f.txt"
+            assert received[0].total_chunks == 1
+            assert received[0].chunk.data == b"hello"
+            assert received[0].version_vector == VersionVector({"dev-a": 2})
+        finally:
+            await transport_a.stop()
+            await transport_b.stop()
+
+    async def test_receive_pushes_identifies_sender_among_multiple_sessions(self) -> None:
+        """With sessions for two peers, a push from either is still decrypted correctly."""
+        cipher = AesGcmCipher()
+        keys_ab = _session_keys("dev-a", 19311, "dev-b", 19312)
+        # A third peer "dev-c" shares transport_b's store so transport_b
+        # has sessions for *two* peers -- receive_pushes must try both
+        # and pick the one that actually decrypts.
+        keys_ab.put(
+            "dev-c",
+            PeerSession(
+                send_key=KEY_1, receive_key=KEY_2, transfer_port=19313, manifest_port=19313
+            ),
+        )
+        transport_a = TcpTransferTransport("dev-a", "127.0.0.1", 19311, cipher, keys_ab)
+        transport_b = TcpTransferTransport("dev-b", "127.0.0.1", 19312, cipher, keys_ab)
+        await transport_a.start()
+        await transport_b.start()
+        try:
+            await transport_a.send_chunk(
+                _peer("dev-b", 19312),
+                _chunk("c1", b"hello", "a" * 64),
+                relative_path="f.txt",
+                total_chunks=1,
+            )
+
+            received = []
+            async for push in transport_b.receive_pushes():
+                received.append(push)
+                break
+
+            assert received[0].chunk.data == b"hello"
         finally:
             await transport_a.stop()
             await transport_b.stop()

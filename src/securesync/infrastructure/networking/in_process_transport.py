@@ -27,9 +27,10 @@ import structlog
 
 from securesync.core.protocol import Packet, PacketType, make_header
 from securesync.domain.chunk import Chunk, ChunkAlgorithm, ChunkHash, ChunkMetadata
+from securesync.domain.conflict import VersionVector
 from securesync.domain.crypto import NONCE_SIZE, TAG_SIZE, AeadCipher, EncryptedPayload
 from securesync.domain.networking import Peer
-from securesync.domain.transfer import TransferTransport
+from securesync.domain.transfer import IncomingPush, TransferTransport
 
 logger = structlog.get_logger(__name__)
 
@@ -105,12 +106,25 @@ class InProcessTransferTransport(TransferTransport):
         self._message_id += 1
         return self._message_id
 
-    async def send_chunk(self, peer: Peer, chunk: Chunk) -> None:
+    async def send_chunk(
+        self,
+        peer: Peer,
+        chunk: Chunk,
+        *,
+        relative_path: str,
+        total_chunks: int,
+        version_vector: VersionVector | None = None,
+    ) -> None:
         """Encrypt and deliver a chunk to a peer's inbox.
 
         Args:
             peer: The peer to send the chunk to.
             chunk: The chunk to send.
+            relative_path: The file this chunk belongs to, relative to
+                the sync root.
+            total_chunks: How many chunks make up the complete file.
+            version_vector: This device's version vector for the
+                file, if known.
         """
         payload = {
             "chunk_id": chunk.metadata.chunk_id,
@@ -124,6 +138,9 @@ class InProcessTransferTransport(TransferTransport):
                 chunk.metadata.chunk_hash.digest if chunk.metadata.chunk_hash else None
             ),
             "data": chunk.data,
+            "relative_path": relative_path,
+            "total_chunks": total_chunks,
+            "version_counters": version_vector.counters if version_vector is not None else None,
         }
         header = make_header(PacketType.CHUNK_DATA, message_id=self._next_message_id())
         framed = Packet(header=header, payload=payload).encode()
@@ -168,6 +185,32 @@ class InProcessTransferTransport(TransferTransport):
                 continue
             remaining.discard(digest)
             yield self._chunk_from_payload(packet.payload)
+
+    async def receive_pushes(self) -> AsyncIterator[IncomingPush]:
+        """See :meth:`TransferTransport.receive_pushes`.
+
+        This transport is constructed with a single fixed
+        `receive_key` for one peer pair (unlike `TcpTransferTransport`,
+        which serves many peers from one instance), so there's no
+        sender-identification step needed here.
+        """
+        inbox = self._network.inbox_for(self._own_device_id)
+        while True:
+            envelope = await inbox.get()
+            encrypted = self._unpack_envelope(envelope)
+            framed = self._cipher.decrypt(
+                encrypted, self._receive_key, associated_data=self._own_device_id.encode("utf-8")
+            )
+            packet = Packet.decode(framed)
+            version_counters = packet.payload.get("version_counters")
+            yield IncomingPush(
+                relative_path=str(packet.payload["relative_path"]),
+                total_chunks=int(packet.payload["total_chunks"]),
+                chunk=self._chunk_from_payload(packet.payload),
+                version_vector=VersionVector(dict(version_counters))
+                if version_counters is not None
+                else None,
+            )
 
     @staticmethod
     def _pack_envelope(payload: EncryptedPayload) -> bytes:

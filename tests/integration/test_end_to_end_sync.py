@@ -1,6 +1,7 @@
 """End-to-end test: two real `bootstrap()`'d SecureSync instances sync a
 real file over real TCP, with real encryption, real identities, and a
-real SQLite metadata store on each side.
+real SQLite metadata store on each side — fully automatically, with no
+manual intervention on the receiving side.
 
 The one piece of a real deployment this test doesn't exercise is mDNS
 discovery itself — `Zeroconf`/`ServiceBrowser` are patched out the same
@@ -10,22 +11,31 @@ wanted) in a test environment, and it already has its own dedicated
 test. In its place, this test calls `handle_peer_discovered` directly
 via `bootstrap`'s `on_ready` hook — everything downstream of "a peer
 was discovered" (session handshake, manifest exchange, delta
-computation, chunk transfer, file reconstruction) is the real
-production code path.
+computation, chunk transfer, and — as of Phase 21 — autonomous file
+reconstruction) is the real production code path.
 
-This test is also what caught a real, previously-unnoticed bug: before
-this phase, `main.py` never actually constructed or passed a
-`SyncFileUseCase` into `SyncOrchestrator`, so `_auto_push_known_files`
-silently no-op'd on every real run — the entire Phase 15-17 sync
-pipeline was fully built and unit-tested but never wired into the
-running application. See the Phase 20 report for details.
+## History
+
+Phase 20 first wrote this test and it immediately found three real
+bugs (see ADR-0025): `main.py` never wired `SyncFileUseCase` into
+`SyncOrchestrator` at all, `TcpTransferTransport` looked up sessions
+under the wrong device_id, and `send_chunk` connected to the wrong
+port. Even after fixing all three, this test still needed a manual
+workaround on B's side (calling `DownloadChunksUseCase.execute`
+directly) because nothing autonomously drained a pushed chunk and
+reconstructed the file — `push` had no receiver, unlike `pull`.
+
+Phase 21 built that receiver (`ReceivePushedFilesUseCase`, wired into
+`bootstrap` as a background task — see ADR-0026) and this test was
+rewritten to remove the workaround entirely: it now just writes a file
+on A and polls for it to appear on B, the same way a person actually
+using SecureSync would experience it.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
-import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -37,6 +47,9 @@ from securesync.domain.conflict import VersionVector
 from securesync.domain.metadata import FileMetadata
 from securesync.domain.networking import Peer, PeerAddress, PeerCapabilities, PeerIdentity
 from securesync.main import bootstrap
+
+_SYNC_TIMEOUT = 10.0
+_POLL_INTERVAL = 0.1
 
 
 def _write_config(tmp_path: Path, *, device_id: str, base_port: int) -> tuple[Path, Path]:
@@ -99,8 +112,33 @@ async def _start_device(config_path: Path, sync_dir: Path) -> _Device:
     return device
 
 
+async def _wait_for_file(
+    path: Path, expected_bytes: bytes, timeout_seconds: float = _SYNC_TIMEOUT
+) -> None:
+    """Poll until `path` exists and matches `expected_bytes`, or time out.
+
+    A plain polling loop over `pathlib.Path`, not `asyncio.timeout` or
+    `anyio.Path` — this is a synchronous, blocking filesystem check
+    (deliberately, since it's what actually happened on disk that
+    matters here), just interleaved with real `asyncio.sleep` between
+    checks so other tasks (the two real bootstrap()'d instances) keep
+    running.
+    """
+    elapsed = 0.0
+    while elapsed < timeout_seconds:
+        if path.exists() and path.read_bytes() == expected_bytes:  # noqa: ASYNC240
+            return
+        await asyncio.sleep(_POLL_INTERVAL)
+        elapsed += _POLL_INTERVAL
+    actual = path.read_bytes() if path.exists() else None  # noqa: ASYNC240
+    raise AssertionError(
+        f"{path} did not sync within {timeout_seconds}s "
+        f"(exists={path.exists()}, content={actual!r}, expected={expected_bytes!r})"  # noqa: ASYNC240
+    )
+
+
 class TestEndToEndSync:
-    async def test_file_created_on_a_syncs_to_b(self, tmp_path: Path) -> None:
+    async def test_file_created_on_a_syncs_to_b_automatically(self, tmp_path: Path) -> None:
         config_a, sync_a = _write_config(tmp_path, device_id="device-a", base_port=19610)
         config_b, sync_b = _write_config(tmp_path, device_id="device-b", base_port=19620)
 
@@ -128,8 +166,10 @@ class TestEndToEndSync:
                 )
 
                 # Simulate B being discovered by A -- this triggers the
-                # real handshake, real session establishment, and (per
-                # this phase's fix) the real auto-push/sync pipeline.
+                # real handshake, real session establishment, direction
+                # resolution (PUSH, since B has no manifest for this
+                # file yet), and a real encrypted chunk delivered to
+                # B's real listening socket.
                 peer_b = Peer(
                     identity=PeerIdentity(
                         device_id="device-b", hostname="device-b-host", fingerprint="n/a"
@@ -140,47 +180,19 @@ class TestEndToEndSync:
                 assert device_a.orchestrator is not None
                 await device_a.orchestrator.handle_peer_discovered(peer_b)
 
-                # `_auto_push_known_files` resolves to PUSH here (B has
-                # no manifest for this file yet) and A's real
-                # TcpTransferTransport really does send the encrypted
-                # chunk to B's real listening socket -- verified by the
-                # two bugs this phase's testing found and fixed (wrong
-                # session lookup key, wrong destination port). What
-                # happens on B's side once the bytes arrive is a real,
-                # disclosed gap: nothing in SyncOrchestrator drains an
-                # unsolicited inbound push and reconstructs the file
-                # autonomously yet (see
-                # docs/adr/0025-end-to-end-sync-verification.md). A real
-                # deployment would need a background "push receiver"
-                # component, which is out of this phase's scope.
-                #
-                # This test completes that missing half itself, using
-                # only real production code (DownloadChunksUseCase over
-                # B's real transport, reading from B's real inbox) so
-                # the wire format and crypto are still verified
-                # end-to-end across two independent real processes.
-                assert device_b.orchestrator is not None
-                download = device_b.orchestrator.download_use_case
-                assert download is not None
-                expected_hash = hashlib.sha256(content).hexdigest()
-                received = [
-                    chunk
-                    async for chunk in download.execute(
-                        Peer(
-                            identity=PeerIdentity(
-                                device_id="device-a", hostname="device-a-host", fingerprint="n/a"
-                            ),
-                            address=PeerAddress(ip_address="127.0.0.1", port=19610),
-                            capabilities=PeerCapabilities(version="1.0"),
-                        ),
-                        [expected_hash],
-                    )
-                ]
+                # No manual intervention on B's side needed as of Phase
+                # 21: `ReceivePushedFilesUseCase` (running as a
+                # background task inside B's own bootstrap()) drains
+                # the pushed chunk and reconstructs the file itself.
+                await _wait_for_file(sync_b / "hello.txt", content)
 
-                assert len(received) == 1
-                assert received[0].data == content
-                (sync_b / "hello.txt").write_bytes(received[0].data)
-                assert (sync_b / "hello.txt").read_bytes() == content
+                # And B's own metadata store reflects it, ready to be
+                # reported back to A (or a third device) as B's own
+                # up-to-date manifest.
+                assert device_b.orchestrator is not None
+                b_meta = await device_b.orchestrator.metadata_repo.get_file_metadata("hello.txt")
+                assert b_meta is not None
+                assert b_meta.version_vector.counters.get("device-a") == 1
             finally:
                 await device_a.stop()
                 await device_b.stop()

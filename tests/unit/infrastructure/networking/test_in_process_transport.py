@@ -10,6 +10,7 @@ from securesync.application.use_cases.transfer_chunks import (
     UploadChunksUseCase,
 )
 from securesync.domain.chunk import Chunk, ChunkAlgorithm, ChunkHash, ChunkMetadata
+from securesync.domain.conflict import VersionVector
 from securesync.domain.networking import Peer, PeerAddress, PeerCapabilities, PeerIdentity
 from securesync.infrastructure.crypto.pyca_crypto import AesGcmCipher
 from securesync.infrastructure.networking.in_process_transport import (
@@ -60,7 +61,7 @@ class TestSendAndRequestChunks:
         transport_a, transport_b = _paired_transports(network, AesGcmCipher())
         chunk = _chunk("c1", b"hello world", "a" * 64)
 
-        await transport_a.send_chunk(_peer("dev-b"), chunk)
+        await transport_a.send_chunk(_peer("dev-b"), chunk, relative_path="f.txt", total_chunks=1)
         received = [c async for c in transport_b.request_chunks(_peer("dev-a"), ["a" * 64])]
 
         assert len(received) == 1
@@ -72,8 +73,12 @@ class TestSendAndRequestChunks:
         network = InProcessNetwork()
         transport_a, transport_b = _paired_transports(network, AesGcmCipher())
 
-        await transport_a.send_chunk(_peer("dev-b"), _chunk("c1", b"one", "a" * 64))
-        await transport_a.send_chunk(_peer("dev-b"), _chunk("c2", b"two", "b" * 64))
+        await transport_a.send_chunk(
+            _peer("dev-b"), _chunk("c1", b"one", "a" * 64), relative_path="f.txt", total_chunks=2
+        )
+        await transport_a.send_chunk(
+            _peer("dev-b"), _chunk("c2", b"two", "b" * 64), relative_path="f.txt", total_chunks=2
+        )
 
         received = [c async for c in transport_b.request_chunks(_peer("dev-a"), ["b" * 64])]
 
@@ -87,7 +92,9 @@ class TestSendAndRequestChunks:
         transport_a = InProcessTransferTransport("dev-a", network, cipher, KEY_1, KEY_2)
         transport_b = InProcessTransferTransport("dev-b", network, cipher, KEY_2, b"x" * 32)
 
-        await transport_a.send_chunk(_peer("dev-b"), _chunk("c1", b"secret", "a" * 64))
+        await transport_a.send_chunk(
+            _peer("dev-b"), _chunk("c1", b"secret", "a" * 64), relative_path="f.txt", total_chunks=1
+        )
 
         with pytest.raises(InvalidTag):
             async for _ in transport_b.request_chunks(_peer("dev-a"), ["a" * 64]):
@@ -107,7 +114,51 @@ class TestAgainstRealUseCases:
             yield _chunk("c1", b"abc", "a" * 64)
             yield _chunk("c2", b"def", "b" * 64)
 
-        await upload.execute(_peer("dev-b"), chunks_to_send())
+        await upload.execute(
+            _peer("dev-b"), chunks_to_send(), relative_path="f.txt", total_chunks=2
+        )
         received = [c async for c in download.execute(_peer("dev-a"), ["a" * 64, "b" * 64])]
 
         assert [c.data for c in received] == [b"abc", b"def"]
+
+
+class TestReceivePushes:
+    """Tests for the autonomous-push-reception side (ADR-0026)."""
+
+    async def test_receive_pushes_yields_relative_path_and_total_chunks(self) -> None:
+        network = InProcessNetwork()
+        transport_a, transport_b = _paired_transports(network, AesGcmCipher())
+
+        await transport_a.send_chunk(
+            _peer("dev-b"), _chunk("c1", b"hello", "a" * 64), relative_path="f.txt", total_chunks=1
+        )
+
+        received = []
+        async for push in transport_b.receive_pushes():
+            received.append(push)
+            break
+
+        assert len(received) == 1
+        assert received[0].relative_path == "f.txt"
+        assert received[0].total_chunks == 1
+        assert received[0].chunk.data == b"hello"
+        assert received[0].version_vector is None
+
+    async def test_receive_pushes_carries_version_vector_when_provided(self) -> None:
+        network = InProcessNetwork()
+        transport_a, transport_b = _paired_transports(network, AesGcmCipher())
+
+        await transport_a.send_chunk(
+            _peer("dev-b"),
+            _chunk("c1", b"hello", "a" * 64),
+            relative_path="f.txt",
+            total_chunks=1,
+            version_vector=VersionVector({"dev-a": 3}),
+        )
+
+        received = []
+        async for push in transport_b.receive_pushes():
+            received.append(push)
+            break
+
+        assert received[0].version_vector == VersionVector({"dev-a": 3})

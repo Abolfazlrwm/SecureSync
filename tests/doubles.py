@@ -34,7 +34,7 @@ from securesync.domain.events import FileSystemEvent
 from securesync.domain.identity import IdentityKeyPair, IdentityProvider, TrustedPeerRepository
 from securesync.domain.manifest_exchange import ManifestExchangeTransport, ManifestWithVersion
 from securesync.domain.networking import Peer
-from securesync.domain.transfer import TransferTransport
+from securesync.domain.transfer import IncomingPush, TransferTransport
 from securesync.domain.watcher import FileSystemEventObserver, FileWatcher
 
 
@@ -366,17 +366,28 @@ class FakeTransferTransport(TransferTransport):
 
     ``sent`` records every ``send_chunk`` call as ``(peer.device_id, chunk)``
     for assertions. Seed ``inbox[device_id]`` with chunks for
-    ``request_chunks`` to yield back (matching by hash).
+    ``request_chunks`` to yield back (matching by hash). Seed
+    ``pushes`` with ``IncomingPush`` items for ``receive_pushes`` to
+    yield.
     """
 
     def __init__(self) -> None:
         """Initialize with no recorded sends and an empty inbox."""
-        self.sent: list[tuple[str, Chunk]] = []
+        self.sent: list[tuple[str, Chunk, str, int]] = []
         self.inbox: dict[str, list[Chunk]] = {}
+        self.pushes: list[IncomingPush] = []
 
-    async def send_chunk(self, peer: Peer, chunk: Chunk) -> None:
+    async def send_chunk(
+        self,
+        peer: Peer,
+        chunk: Chunk,
+        *,
+        relative_path: str,
+        total_chunks: int,
+        version_vector: VersionVector | None = None,
+    ) -> None:
         """Record the send for later assertions."""
-        self.sent.append((peer.device_id, chunk))
+        self.sent.append((peer.device_id, chunk, relative_path, total_chunks))
 
     async def request_chunks(self, peer: Peer, chunk_hashes: list[str]) -> AsyncIterator[Chunk]:
         """Yield chunks from ``inbox[peer.device_id]`` matching ``chunk_hashes``."""
@@ -384,3 +395,8 @@ class FakeTransferTransport(TransferTransport):
             chunk_hash = chunk.metadata.chunk_hash
             if chunk_hash is not None and chunk_hash.digest in chunk_hashes:
                 yield chunk
+
+    async def receive_pushes(self) -> AsyncIterator[IncomingPush]:
+        """Yield every ``IncomingPush`` seeded in ``self.pushes``."""
+        for push in self.pushes:
+            yield push

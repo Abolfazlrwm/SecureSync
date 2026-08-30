@@ -16,11 +16,13 @@ from securesync.application.use_cases.calculate_chunk_hashes import CalculateChu
 from securesync.application.use_cases.chunk_file import ChunkFileUseCase
 from securesync.application.use_cases.conflict_resolution import DetectConflictUseCase
 from securesync.application.use_cases.discover_peers import DiscoverPeersUseCase
+from securesync.application.use_cases.receive_pushed_files import ReceivePushedFilesUseCase
 from securesync.application.use_cases.sync_file import SyncFileUseCase
 from securesync.application.use_cases.transfer_chunks import (
     DownloadChunksUseCase,
     UploadChunksUseCase,
 )
+from securesync.domain.conflict import VersionVector
 from securesync.domain.sync_direction import SyncDirectionResolver
 from securesync.infrastructure.chunking.file_chunk_repository import FileChunkRepository
 from securesync.infrastructure.chunking.local_file_reconstructor import LocalFileReconstructor
@@ -161,6 +163,19 @@ async def bootstrap(
     download_use_case = DownloadChunksUseCase(transport)
     upload_use_case = UploadChunksUseCase(transport)
 
+    # See ADR-0025/0026: `push` (unlike `pull`) has no request/response
+    # round trip, so a background loop has to actively drain arriving
+    # chunks and reconstruct each file itself, rather than waiting for
+    # something to ask for them by hash the way `request_chunks` does.
+    receive_pushed_files_use_case = ReceivePushedFilesUseCase(
+        transport,
+        Path(config.storage.sync_directory),
+        LocalFileReconstructor(),
+        metadata_repo,
+        device_id,
+    )
+    receive_pushes_task = asyncio.create_task(receive_pushed_files_use_case.run_forever())
+
     # The local chunk manifests peers request are the same store
     # ComputeDeltaUseCase already reads baselines from (ADR-0010: this
     # repository already is SecureSync's persistent manifest store).
@@ -184,6 +199,17 @@ async def bootstrap(
     # silent no-op in every real run: `_auto_push_known_files` returns
     # immediately whenever `sync_file_use_case` is `None`. This wiring
     # is what makes peer discovery actually result in files moving.
+    async def _local_version(relative_path: str) -> VersionVector | None:
+        """Look up this device's own recorded version for a file.
+
+        Lets `SyncFileUseCase.push` include a real version vector with
+        each push (see ADR-0026) instead of leaving the receiving
+        side's `ReceivePushedFilesUseCase` to fall back to inventing
+        one from scratch.
+        """
+        existing = await metadata_repo.get_file_metadata(relative_path)
+        return existing.version_vector if existing is not None else None
+
     sync_file_use_case = SyncFileUseCase(
         manifest_exchange=manifest_exchange,
         chunk_file_use_case=ChunkFileUseCase(StreamingChunkReader(), SHA256HashProvider()),
@@ -193,6 +219,7 @@ async def bootstrap(
         upload_use_case=upload_use_case,
         chunk_repository=chunk_repository,
         file_reconstructor=LocalFileReconstructor(),
+        local_version_provider=_local_version,
         direction_resolver=SyncDirectionResolver(),
     )
     chunking_strategy = FixedSizeChunkingStrategy(chunk_size=config.storage.chunk_size)
@@ -243,8 +270,11 @@ async def bootstrap(
         await orchestrator.wait_until_stopped()
     finally:
         drain_task.cancel()
+        receive_pushes_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await drain_task
+        with contextlib.suppress(asyncio.CancelledError):
+            await receive_pushes_task
         await manifest_exchange.stop()
         await transport.stop()
         await handshake_server.stop()

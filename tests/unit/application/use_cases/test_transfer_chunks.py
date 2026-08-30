@@ -55,6 +55,8 @@ async def test_upload_chunks_use_case(mock_peer) -> None:
         yield chunk
 
     use_case = UploadChunksUseCase(transport)
-    await use_case.execute(mock_peer, chunk_gen())
+    await use_case.execute(mock_peer, chunk_gen(), relative_path="f.txt", total_chunks=1)
 
-    transport.send_chunk.assert_called_once_with(mock_peer, chunk)
+    transport.send_chunk.assert_called_once_with(
+        mock_peer, chunk, relative_path="f.txt", total_chunks=1, version_vector=None
+    )

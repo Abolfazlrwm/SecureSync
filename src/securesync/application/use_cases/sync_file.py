@@ -33,6 +33,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Protocol
 
 import structlog
 
@@ -164,6 +165,11 @@ class SyncFileUseCase:
             source_path, strategy, chunk_size=chunk_size
         )
         peer_manifest = await self._normalized_peer_manifest(peer, relative_path, source_path)
+        local_version = (
+            await self._local_version_provider(relative_path)
+            if self._local_version_provider is not None
+            else None
+        )
 
         upload_plan = self._calculator.compute(baseline=peer_manifest, current=current)
         if upload_plan.transfer_count > 0:
@@ -173,7 +179,18 @@ class SyncFileUseCase:
                 if metadata.chunk_hash is not None
             }
             await self._upload_use_case.execute(
-                peer, self._filter_chunks_to_upload(source_path, strategy, needed_hashes)
+                peer,
+                self._filter_chunks_to_upload(source_path, strategy, needed_hashes),
+                relative_path=relative_path,
+                # The count of chunks actually being sent *in this
+                # push* (only what upload_plan says the peer is
+                # missing), not the file's full chunk count — an
+                # incremental update only retransmits the changed
+                # chunks, and the receiving side's existing file
+                # already has correct bytes everywhere else (see
+                # ReceivePushedFilesUseCase / ADR-0026).
+                total_chunks=len(needed_hashes),
+                version_vector=local_version,
             )
         await asyncio.to_thread(self._chunk_repository.save, current)
 
@@ -412,8 +429,16 @@ class SyncFileUseCase:
                 yield chunk
 
 
-class LocalVersionProvider:
-    """Callable returning the local VersionVector for a relative path."""
+class LocalVersionProvider(Protocol):
+    """Callable returning the local VersionVector for a relative path.
 
-    async def __call__(self, relative_path: str) -> VersionVector | None:
-        ...
+    A `Protocol` (structural typing), not a concrete base class to
+    subclass — this was previously a plain class, which meant mypy
+    rejected any ordinary async function passed for this parameter
+    (only an actual `LocalVersionProvider` instance satisfied it) even
+    though the runtime behavior — "any async callable with this
+    signature" — always worked correctly; `main.py`'s Phase 21 wiring
+    of a plain local function is what surfaced this.
+    """
+
+    async def __call__(self, relative_path: str) -> VersionVector | None: ...

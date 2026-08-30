@@ -23,12 +23,14 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import structlog
+from cryptography.exceptions import InvalidTag
 
 from securesync.core.protocol import Packet, PacketType, make_header
 from securesync.domain.chunk import Chunk, ChunkAlgorithm, ChunkHash, ChunkMetadata
+from securesync.domain.conflict import VersionVector
 from securesync.domain.crypto import NONCE_SIZE, TAG_SIZE, AeadCipher, EncryptedPayload
 from securesync.domain.networking import Peer
-from securesync.domain.transfer import TransferTransport
+from securesync.domain.transfer import IncomingPush, TransferTransport
 from securesync.infrastructure.networking.session_key_store import SessionKeyStore
 
 logger = structlog.get_logger(__name__)
@@ -122,12 +124,26 @@ class TcpTransferTransport(TransferTransport):
             with contextlib.suppress(ConnectionError):
                 await writer.wait_closed()
 
-    async def send_chunk(self, peer: Peer, chunk: Chunk) -> None:
+    async def send_chunk(
+        self,
+        peer: Peer,
+        chunk: Chunk,
+        *,
+        relative_path: str,
+        total_chunks: int,
+        version_vector: VersionVector | None = None,
+    ) -> None:
         """Encrypt a chunk and send it to a peer over a short-lived TCP connection.
 
         Args:
             peer: The peer to send the chunk to.
             chunk: The chunk to send.
+            relative_path: The file this chunk belongs to, relative to
+                the sync root — see `IncomingPush` for why the
+                receiving side needs this alongside the chunk itself.
+            total_chunks: How many chunks make up the complete file.
+            version_vector: This device's version vector for the
+                file, if known.
 
         Raises:
             OSError: If a connection to `peer` can't be established.
@@ -144,6 +160,9 @@ class TcpTransferTransport(TransferTransport):
                 chunk.metadata.chunk_hash.digest if chunk.metadata.chunk_hash else None
             ),
             "data": chunk.data,
+            "relative_path": relative_path,
+            "total_chunks": total_chunks,
+            "version_counters": version_vector.counters if version_vector is not None else None,
         }
         header = make_header(PacketType.CHUNK_DATA, message_id=self._next_message_id())
         framed = Packet(header=header, payload=payload).encode()
@@ -211,6 +230,44 @@ class TcpTransferTransport(TransferTransport):
                 continue
             remaining.discard(digest)
             yield self._chunk_from_payload(packet.payload)
+
+    async def receive_pushes(self) -> AsyncIterator[IncomingPush]:
+        """See :meth:`TransferTransport.receive_pushes`.
+
+        Unlike `request_chunks`, this doesn't know in advance which
+        peer a given message came from, so it tries every currently
+        known session's `receive_key` in turn (AEAD authentication
+        naturally rejects the wrong key, so this both decrypts and
+        identifies the sender in one step) — practical for the small
+        peer counts a P2P sync tool actually has.
+        """
+        while True:
+            envelope = await self._inbox.get()
+            encrypted = self._unpack_envelope(envelope)
+            framed: bytes | None = None
+            for session in self._session_keys.all_sessions():
+                try:
+                    framed = self._cipher.decrypt(
+                        encrypted,
+                        session.receive_key,
+                        associated_data=self._own_device_id.encode("utf-8"),
+                    )
+                    break
+                except InvalidTag:
+                    continue
+            if framed is None:
+                logger.warning("undecryptable_push_dropped")
+                continue
+            packet = Packet.decode(framed)
+            version_counters = packet.payload.get("version_counters")
+            yield IncomingPush(
+                relative_path=str(packet.payload["relative_path"]),
+                total_chunks=int(packet.payload["total_chunks"]),
+                chunk=self._chunk_from_payload(packet.payload),
+                version_vector=VersionVector(dict(version_counters))
+                if version_counters is not None
+                else None,
+            )
 
     @staticmethod
     async def _read_envelope(reader: asyncio.StreamReader) -> bytes:

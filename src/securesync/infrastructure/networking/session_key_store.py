@@ -78,3 +78,15 @@ class SessionKeyStore:
     def has(self, device_id: str) -> bool:
         """Return whether a session is already recorded for `device_id`."""
         return device_id in self._sessions
+
+    def all_sessions(self) -> list[PeerSession]:
+        """Return every currently recorded session.
+
+        Used by `TcpTransferTransport.receive_pushes` to identify
+        which peer sent an unsolicited push: unlike `request_chunks`
+        (which already knows which single peer to expect), a push can
+        arrive from any peer this device has a session with, so the
+        receiver tries each session's `receive_key` in turn until one
+        successfully authenticates the message (see ADR-0026).
+        """
+        return list(self._sessions.values())

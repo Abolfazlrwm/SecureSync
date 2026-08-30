@@ -5,6 +5,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Phase 21: Push Receiver
+
+- `domain/transfer.py`: `send_chunk` now takes `relative_path`,
+  `total_chunks`, and optional `version_vector`; new `IncomingPush`
+  dataclass and `TransferTransport.receive_pushes()` abstract method.
+- `TcpTransferTransport`/`InProcessTransferTransport`: implement
+  `receive_pushes()`. The TCP implementation identifies an unsolicited
+  sender by trying each known session's key in turn.
+- `SessionKeyStore.all_sessions()`.
+- `application/use_cases/receive_pushed_files.py` (new):
+  `ReceivePushedFilesUseCase` — drains pushes, reconstructs files,
+  merges version vectors, finalizes metadata. Wired into `main.py` as
+  a background task.
+- `docs/adr/0026-push-receiver.md`.
+
+### Fixed — Phase 21
+
+- `main.py`: `SyncFileUseCase` now has a real `local_version_provider`
+  backed by `metadata_repo` -- pushes previously always sent
+  `version_vector=None` regardless of what the sender actually knew.
+- `sync_file.py`: `LocalVersionProvider` is now a proper `Protocol`
+  (was a plain class, silently rejecting any ordinary function passed
+  for that parameter under mypy even though it worked at runtime).
+- `tests/integration/test_end_to_end_sync.py`: removed the manual
+  `DownloadChunksUseCase` workaround -- the file now syncs and is
+  polled for with no receiving-side intervention.
+
 ### Fixed — Phase 20: End-to-End Sync Verification
 
 - `main.py`: `bootstrap()` now constructs and wires `SyncFileUseCase`

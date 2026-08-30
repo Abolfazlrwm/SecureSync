@@ -215,6 +215,25 @@ Status is updated at the end of every phase alongside `CHANGELOG.md`.
       request/response RPC, doesn't have this problem). See
       ADR-0025.
       
+      - [x] **Phase 21 — Push Receiver**
+      Closes the last gap ADR-0025 disclosed: nothing autonomously
+      turned an arriving pushed chunk into a reconstructed file.
+      Fixing it required extending the wire protocol itself — a
+      pushed chunk's payload previously carried no file identity at
+      all, so `send_chunk` now also sends `relative_path`,
+      `total_chunks`, and an optional `version_vector`.
+      `TransferTransport.receive_pushes()` drains unsolicited chunks
+      from any peer (identifying the sender by trying each known
+      session's key in turn, since AEAD rejects the wrong one), and
+      the new `ReceivePushedFilesUseCase` writes each chunk via
+      `FileReconstructor` and finalizes the file's metadata once all
+      of it has arrived. `main.py` also gained a real
+      `local_version_provider`, so pushes now carry the sender's
+      actual version vector end to end. The Phase 20 end-to-end test
+      was rewritten with its manual receiving-side workaround removed
+      entirely — cross-device sync is now fully autonomous in both
+      directions. See ADR-0026.
+      
 ## Advanced features (introduced opportunistically, in the phase they fit)
 
 Custom binary protocol · plugin system · event bus · job scheduler ·

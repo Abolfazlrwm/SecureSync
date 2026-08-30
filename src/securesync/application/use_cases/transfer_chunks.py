@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator, Sequence
 import structlog
 
 from securesync.domain.chunk import Chunk
+from securesync.domain.conflict import VersionVector
 from securesync.domain.networking import Peer
 from securesync.domain.transfer import TransferTransport
 
@@ -43,18 +44,43 @@ class UploadChunksUseCase:
     def __init__(self, transport: TransferTransport) -> None:
         self._transport = transport
 
-    async def execute(self, peer: Peer, chunks: AsyncIterator[Chunk]) -> None:
+    async def execute(
+        self,
+        peer: Peer,
+        chunks: AsyncIterator[Chunk],
+        *,
+        relative_path: str,
+        total_chunks: int,
+        version_vector: VersionVector | None = None,
+    ) -> None:
         """Upload chunks to a peer.
 
         Args:
             peer: The peer to upload to.
-            chunks: An iterator of chunks to send.
+            chunks: An iterator of chunks to send. All chunks in one
+                call must belong to the same file.
+            relative_path: The file these chunks belong to, relative
+                to the sync root — the receiving side needs this to
+                know where to reconstruct the file (see
+                `IncomingPush` and ADR-0026).
+            total_chunks: How many chunks make up the complete file.
+            version_vector: This device's version vector for the
+                file, if known, so the receiving side's
+                `ReceivePushedFilesUseCase` can merge it instead of
+                inventing one from scratch. `None` for legacy/no-version
+                callers, matching ADR-0024's existing fallback pattern.
         """
         logger.info("upload_started", peer_id=peer.device_id)
 
         count = 0
         async for chunk in chunks:
-            await self._transport.send_chunk(peer, chunk)
+            await self._transport.send_chunk(
+                peer,
+                chunk,
+                relative_path=relative_path,
+                total_chunks=total_chunks,
+                version_vector=version_vector,
+            )
             count += 1
 
         logger.info("upload_finished", peer_id=peer.device_id, chunks_sent=count)

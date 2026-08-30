@@ -2,8 +2,8 @@
 # These are placeholders — replace with real GitHub usernames/teams once
 # the project has maintainers beyond the initial author.
 
-*                           @<org>/maintainers
+*                           @Abolfazlrwm
 
-/src/securesync/infrastructure/**/crypto*   @<org>/security-reviewers
-docs/security.md                            @<org>/security-reviewers
-docs/protocol.md                            @<org>/security-reviewers
+/src/securesync/infrastructure/**/crypto*   @Abolfazlrwm
+docs/security.md                            @Abolfazlrwm
+docs/protocol.md                            @Abolfazlrwm

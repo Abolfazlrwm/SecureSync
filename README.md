@@ -5,20 +5,26 @@
 
 **Encrypted peer-to-peer file synchronization engine.**
 
-[![CI](https://github.com/<org>/securesync/actions/workflows/ci.yml/badge.svg)](.github/workflows/ci.yml)
+[![CI](https://github.com/Abolfazlrwm/SecureSync/actions/workflows/ci.yml/badge.svg)](https://github.com/Abolfazlrwm/SecureSync/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)]()
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-inspired-4baaaa.svg)](CODE_OF_CONDUCT.md)
-[![Status](https://img.shields.io/badge/status-Phase_17_%E2%80%94_version_aware_sync-green)]()
+[![Tests](https://img.shields.io/badge/tests-413%20passing-brightgreen)]()
+[![Coverage](https://img.shields.io/badge/coverage-93%25-brightgreen)]()
+[![Status](https://img.shields.io/badge/status-Phase_21_%E2%80%94_push_receiver-green)]()
 
 </div>
 
-> ✅ **Project status:** Phases 0-17 are fully implemented.
-> SecureSync now features end-to-end encrypted peer-to-peer sync with
-> version-aware direction decisions, trust-on-first-use authentication,
-> and a working CLI. See
-> [ROADMAP.md](ROADMAP.md) for the implementation history.
+> ✅ **Project status:** Phases 0-21 are fully implemented.
+> SecureSync performs real, fully autonomous, bidirectional
+> peer-to-peer file sync end to end — verified by
+> [tests/integration/test_end_to_end_sync.py](tests/integration/test_end_to_end_sync.py),
+> which runs two real instances over real TCP and confirms a file
+> created on one device is reconstructed correctly on the other, with
+> no manual intervention. See [ROADMAP.md](ROADMAP.md) for the full
+> implementation history and [docs/adr/](docs/adr/) for 26 ADRs
+> documenting every real bug found and fixed along the way.
 
 ---
 
@@ -79,14 +85,20 @@ flowchart LR
 - [x] SQLite-backed metadata store (files, chunks, version history)
 - [x] Synchronization Orchestrator with state machine and lifecycle control
 - [x] Version-aware sync direction (PUSH / PULL / CONFLICT / NOOP)
-- [x] CLI entry point (`securesync` init / config / peers / sync / pull / daemon)
+- [x] Autonomous push receiver: an unsolicited pushed file is drained
+      and reconstructed automatically, with no manual intervention
+- [x] CLI entry point (`securesync` init / config / peers / sync / pull / daemon) — 100% test coverage
 - [x] YAML configuration and production bootstrap with signal handling
+      (with a graceful fallback on platforms where `asyncio` doesn't
+      support signal handlers, e.g. Windows)
+- [x] Verified end-to-end: two real instances, real TCP, real crypto —
+      not just unit tests in isolation (see [tests/integration/test_end_to_end_sync.py](tests/integration/test_end_to_end_sync.py))
 
 ## Installation
 
 ```bash
-git clone https://github.com/<org>/securesync.git
-cd securesync
+git clone https://github.com/Abolfazlrwm/SecureSync.git
+cd SecureSync
 pip install -e ".[dev]"
 ```
 

@@ -10,8 +10,8 @@
 ## Setup
 
 ```bash
-git clone https://github.com/<org>/securesync.git
-cd securesync
+git clone https://github.com/Abolfazlrwm/SecureSync.git
+cd SecureSync
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"

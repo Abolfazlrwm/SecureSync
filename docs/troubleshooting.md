@@ -36,7 +36,7 @@ real implementation phase.)*
 
 ## Getting more help
 
-- Search [existing issues](https://github.com/<org>/securesync/issues)
+- Search [existing issues](https://github.com/Abolfazlrwm/SecureSync/issues)
 - Open a new issue using the Bug report template
   (`.github/ISSUE_TEMPLATE/bug_report.yml`)
 - For security-related problems, see [SECURITY.md](../SECURITY.md) instead

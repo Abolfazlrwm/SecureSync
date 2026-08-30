@@ -24,8 +24,8 @@ tested, and documented.
 ## Local setup
 
 ```bash
-git clone https://github.com/<org>/securesync.git
-cd securesync
+git clone https://github.com/Abolfazlrwm/SecureSync.git
+cd SecureSync
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pre-commit install

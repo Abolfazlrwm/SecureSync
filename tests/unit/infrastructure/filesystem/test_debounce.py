@@ -92,18 +92,35 @@ class TestBoundedMemory:
         assert len(debouncer._last_seen) == 1  # only "key-b" remains
 
     def test_memory_stays_bounded_under_sustained_high_churn(self) -> None:
-        """Many distinct keys over time never accumulate past the recent window."""
-        debouncer = EventDebouncer(window_seconds=0.02)
+        """Many distinct keys over time never accumulate past the recent window.
+
+        Windows CI runners have historically coarse timer granularity
+        (`time.sleep()` and `time.monotonic()` resolution can be tens of
+        milliseconds under virtualization/scheduling jitter), so the
+        sleep between batches needs a comfortable multiple of
+        `window_seconds` -- not just barely longer than it -- or the
+        previous batch can still look "fresh" by the time the next
+        batch starts, letting two batches' worth of keys survive
+        instead of one. This was tightened from a 0.02s window with a
+        1.5x sleep margin (which passed everywhere except a real
+        windows-latest GitHub Actions runner) to a wider margin.
+        """
+        debouncer = EventDebouncer(window_seconds=0.05)
         for i in range(500):
             debouncer.should_emit(f"key-{i}")
             if i % 50 == 0:
                 # Let the window lapse periodically, simulating churn
                 # spread out over real time rather than a tight burst.
-                time.sleep(0.03)
+                # 4x window_seconds, not just ~1.5x, to stay reliable
+                # under real CI timer jitter.
+                time.sleep(0.2)
 
         # However many keys were emitted, only the ones seen within the
-        # last window_seconds should still be tracked - nowhere near 500.
-        assert len(debouncer._last_seen) < 50  # noqa: SLF001 - white-box memory test
+        # last window_seconds should still be tracked - nowhere near
+        # 500. Generous enough to tolerate a batch or two lingering
+        # under CI scheduling contention, while still proving this is
+        # bounded, not unbounded.
+        assert len(debouncer._last_seen) < 100  # noqa: SLF001 - white-box memory test
 
 
 class TestThreadSafety:

@@ -123,6 +123,12 @@ async def _wait_for_file(
     matters here), just interleaved with real `asyncio.sleep` between
     checks so other tasks (the two real bootstrap()'d instances) keep
     running.
+
+    Only checks the file itself — a caller that also needs to wait for
+    the receiving device's metadata to be saved (a separate, later
+    async step on that device's own background task) needs its own
+    combined wait; see `test_file_created_on_a_syncs_to_b_automatically`
+    for why checking the file alone isn't always enough.
     """
     elapsed = 0.0
     while elapsed < timeout_seconds:
@@ -184,12 +190,42 @@ class TestEndToEndSync:
                 # 21: `ReceivePushedFilesUseCase` (running as a
                 # background task inside B's own bootstrap()) drains
                 # the pushed chunk and reconstructs the file itself.
-                await _wait_for_file(sync_b / "hello.txt", content)
-
-                # And B's own metadata store reflects it, ready to be
-                # reported back to A (or a third device) as B's own
-                # up-to-date manifest.
+                #
+                # Wait for BOTH the file content AND B's metadata to be
+                # in place, not just the file: `handle_peer_discovered`
+                # returning on A's side only means the bytes were
+                # written to the socket, not that B's independent
+                # background task has finished processing them --
+                # `write_chunk_at_offset` (file) and the metadata save
+                # that follows it are two separate scheduling points on
+                # B's task, and a slower/busier runner (this raced on a
+                # real macOS GitHub Actions runner) can interleave the
+                # test's own polling in between the two.
                 assert device_b.orchestrator is not None
+
+                async def _b_is_fully_synced() -> bool:
+                    if not (sync_b / "hello.txt").exists():
+                        return False
+                    if (sync_b / "hello.txt").read_bytes() != content:
+                        return False
+                    meta = await device_b.orchestrator.metadata_repo.get_file_metadata("hello.txt")
+                    return meta is not None
+
+                elapsed = 0.0
+                while elapsed < _SYNC_TIMEOUT:
+                    if await _b_is_fully_synced():
+                        break
+                    await asyncio.sleep(_POLL_INTERVAL)
+                    elapsed += _POLL_INTERVAL
+                else:
+                    raise AssertionError(
+                        f"hello.txt did not fully sync (file + metadata) to B "
+                        f"within {_SYNC_TIMEOUT}s"
+                    )
+
+                # And B's own metadata store reflects the sender's
+                # version, ready to be reported back to A (or a third
+                # device) as B's own up-to-date manifest.
                 b_meta = await device_b.orchestrator.metadata_repo.get_file_metadata("hello.txt")
                 assert b_meta is not None
                 assert b_meta.version_vector.counters.get("device-a") == 1

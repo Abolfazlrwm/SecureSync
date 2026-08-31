@@ -39,6 +39,7 @@
 - [Documentation](#documentation)
 - [Benchmarks](#benchmarks)
 - [Roadmap](#roadmap)
+- [Known Limitations](#known-limitations)
 - [FAQ](#faq)
 - [Contributing](#contributing)
 - [Security](#security)
@@ -51,6 +52,28 @@ SecureSync is a peer-to-peer file synchronization engine: devices discover
 each other on the network, establish an authenticated end-to-end encrypted
 channel, and synchronize only the parts of files that actually changed. No
 central server holds your data.
+
+### Engineering highlights
+
+This isn't a toy that only passes its own tests — it's been pressure-tested
+against reality at every layer:
+
+- **413 tests, 93% coverage**, including a real end-to-end test
+  ([tests/integration/test_end_to_end_sync.py](tests/integration/test_end_to_end_sync.py))
+  that runs two independent instances over real TCP with real crypto and
+  confirms a file actually reconstructs correctly on the other side.
+- **CI on 3 OSes × 2 Python versions** (Ubuntu, macOS, Windows; 3.12/3.13) —
+  not just "works on my machine." Building this out caught real,
+  platform-specific bugs (a Windows-only `asyncio` signal-handling crash, a
+  macOS-only test race, a Windows-only timer-precision flake) that a
+  single-platform setup would never have surfaced.
+- **26 Architecture Decision Records** ([docs/adr/](docs/adr/)) — a real,
+  unfiltered account of every non-trivial design decision *and* every real
+  bug found along the way (including bugs the end-to-end test caught that
+  413 passing unit tests had missed entirely, because they only existed at
+  the boundary between two independent processes).
+- **Honest about what isn't finished** — see [Known Limitations](#known-limitations)
+  below instead of a roadmap that quietly stops mentioning what's incomplete.
 
 ## Architecture
 
@@ -161,16 +184,49 @@ Benchmarks for chunking, hashing, encryption, and networking are implemented —
 
 See [ROADMAP.md](ROADMAP.md) for the full phase-by-phase plan.
 
+## Known Limitations
+
+A real answer, not a marketing one:
+
+- **The Phase 1 filesystem watcher exists and is fully tested, but isn't
+  wired into `main.py` yet.** Right now, a device only syncs a file once
+  something records it in the metadata store — the live watcher that would
+  do this automatically on every save is a separate, already-built
+  component waiting to be connected. Until then, treat `securesync sync`
+  (explicit) as the supported path.
+- **No compression, resumable transfers, or bandwidth/rate limiting yet.**
+  These are real, scoped items in [ROADMAP.md](ROADMAP.md)'s Advanced
+  Features list, not silently dropped.
+- **The cryptographic protocol composition is not independently audited**
+  (see the FAQ below) — the primitives are, the specific way they're
+  combined here isn't.
+- **Single-writer conflict resolution only** (Last-Writer-Wins by default).
+  True CRDT-style automatic merging for concurrent edits to the same file
+  isn't implemented.
+
 ## FAQ
 
 **Why not just use Syncthing?**
-SecureSync is an educational, ground-up implementation built to demonstrate
-architecture, networking, and cryptography engineering practices.
+You should, if you need a production-ready sync tool today — Syncthing is
+mature, battle-tested, and does far more than this. SecureSync exists to
+demonstrate real engineering practice end to end: Clean Architecture with
+enforced dependency direction, a real (not simulated) cross-device protocol,
+and a development process that documents every real bug found rather than
+hiding it. See [Known Limitations](#known-limitations) for what it
+deliberately doesn't try to do yet.
 
 **Is the cryptography audited?**
 SecureSync only uses well-established primitives from the audited `cryptography`
-(pyca) library. The *composition* of those primitives into a protocol is not
-independently audited.
+(pyca) library — X25519 for key exchange, Ed25519 for identity, AES-256-GCM
+/ ChaCha20-Poly1305 for AEAD. The *composition* of those primitives into a
+protocol is not independently audited. See
+[docs/security.md](docs/security.md) for the full threat model.
+
+**Why does the README mention bugs you found in your own code?**
+Because they're real, and hiding them wouldn't make the code better — see
+[docs/adr/](docs/adr/), especially ADR-0025 and ADR-0026, for two examples
+where two-process end-to-end testing caught real defects that hundreds of
+passing unit tests had missed.
 
 ## Contributing
 

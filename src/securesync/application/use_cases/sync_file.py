@@ -243,9 +243,7 @@ class SyncFileUseCase:
                 for metadata in download_plan.chunks_to_transfer
                 if metadata.chunk_hash is not None
             ]
-            async for chunk in self._manifest_exchange.request_chunks(
-                peer, relative_path, hashes
-            ):
+            async for chunk in self._manifest_exchange.request_chunks(peer, relative_path, hashes):
                 await asyncio.to_thread(
                     self._file_reconstructor.write_chunk_at_offset, source_path, chunk
                 )
@@ -345,9 +343,7 @@ class SyncFileUseCase:
         )
 
         if decision.direction is SyncDirection.PUSH:
-            return await self.push(
-                    peer, sync_root, relative_path, strategy, chunk_size=chunk_size
-                )
+            return await self.push(peer, sync_root, relative_path, strategy, chunk_size=chunk_size)
         if decision.direction is SyncDirection.PULL:
             return await self.pull(peer, sync_root, relative_path, strategy, chunk_size=chunk_size)
         if decision.direction is SyncDirection.NOOP:

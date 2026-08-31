@@ -199,9 +199,7 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
         collection = collection_from_dict(response_packet.payload["collection"])
         # Peer reports its VersionVector as a counters dict (or None).
         version_payload = response_packet.payload.get("version")
-        version = (
-            VersionVector(dict(version_payload["counters"])) if version_payload else None
-        )
+        version = VersionVector(dict(version_payload["counters"])) if version_payload else None
         return ManifestWithVersion(collection=collection, version=version)
 
     async def request_chunks(
@@ -392,9 +390,7 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
         resolved = (self._sync_root / relative_path).resolve()
         sync_root_resolved = self._sync_root.resolve()
         if not str(resolved).startswith(str(sync_root_resolved) + os.sep):
-            raise ValueError(
-                f"Path traversal rejected: {relative_path!r} escapes sync root"
-            )
+            raise ValueError(f"Path traversal rejected: {relative_path!r} escapes sync root")
         return resolved
 
     @staticmethod

@@ -52,6 +52,11 @@ dev = [
     "pytest-cov>=5.0",
     "hypothesis>=6.100",     # Property-based tests for the chunk engine (Phase 2)
     "mypy>=1.10",
+    "types-PyYAML>=6.0",     # Was missing throughout Phases 0-21 -- CI's
+                             # `mypy src` (strict, no tolerance) failed on
+                             # this every single run; local checks treated
+                             # it as a harmless "pre-existing" notice, but
+                             # CI has zero tolerance for any mypy error.
     "ruff>=0.5",
     "black>=24.4",
     "pre-commit>=3.7",

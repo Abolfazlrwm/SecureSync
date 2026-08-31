@@ -32,9 +32,12 @@ def _peer(device_id: str, port: int) -> Peer:
 
 
 def _session_keys(
-    a_id: str, a_port: int,
-    b_id: str, b_port: int,
-    a_send: bytes = KEY_1, b_send: bytes = KEY_2,
+    a_id: str,
+    a_port: int,
+    b_id: str,
+    b_port: int,
+    a_send: bytes = KEY_1,
+    b_send: bytes = KEY_2,
 ) -> SessionKeyStore:
     """Build a shared SessionKeyStore for two transports sharing one store.
 
@@ -69,8 +72,10 @@ def _session_keys(
 
 
 def _session_keys_wrong(
-    a_id: str, a_port: int,
-    b_id: str, b_port: int,
+    a_id: str,
+    a_port: int,
+    b_id: str,
+    b_port: int,
 ) -> SessionKeyStore:
     """A encrypts with KEY_1; B's own receive_key is WRONG_KEY (should fail)."""
     store = SessionKeyStore()
@@ -135,12 +140,16 @@ class TestSendAndRequestChunksOverRealSockets:
         await transport_b.start()
         try:
             await transport_a.send_chunk(
-                _peer("dev-b", 19304), _chunk("c1", b"abc", "a" * 64),
-                relative_path="f.txt", total_chunks=1,
+                _peer("dev-b", 19304),
+                _chunk("c1", b"abc", "a" * 64),
+                relative_path="f.txt",
+                total_chunks=1,
             )
             await transport_b.send_chunk(
-                _peer("dev-a", 19303), _chunk("c2", b"def", "b" * 64),
-                relative_path="g.txt", total_chunks=1,
+                _peer("dev-a", 19303),
+                _chunk("c2", b"def", "b" * 64),
+                relative_path="g.txt",
+                total_chunks=1,
             )
 
             b_received = [
@@ -166,8 +175,10 @@ class TestSendAndRequestChunksOverRealSockets:
         await transport_b.start()
         try:
             await transport_a.send_chunk(
-                _peer("dev-b", 19306), _chunk("c1", b"secret", "a" * 64),
-                relative_path="f.txt", total_chunks=1,
+                _peer("dev-b", 19306),
+                _chunk("c1", b"secret", "a" * 64),
+                relative_path="f.txt",
+                total_chunks=1,
             )
 
             with pytest.raises(InvalidTag):
@@ -200,10 +211,7 @@ class TestAgainstRealUseCases:
                 _peer("dev-b", 19308), chunks_to_send(), relative_path="f.txt", total_chunks=2
             )
             received = [
-                c
-                async for c in download.execute(
-                    _peer("dev-a", 19307), ["a" * 64, "b" * 64]
-                )
+                c async for c in download.execute(_peer("dev-a", 19307), ["a" * 64, "b" * 64])
             ]
 
             assert [c.data for c in received] == [b"abc", b"def"]

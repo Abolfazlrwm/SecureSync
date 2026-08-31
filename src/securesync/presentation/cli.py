@@ -111,8 +111,9 @@ def pull(
 
 @app.command()
 def init(
-    storage_dir: str = typer.Option("~/.securesync", "--storage-dir",
-                                     help="Directory to store config and identity"),
+    storage_dir: str = typer.Option(
+        "~/.securesync", "--storage-dir", help="Directory to store config and identity"
+    ),
 ) -> None:
     """Generate a new device identity and default config."""
     from securesync.domain.identity import IdentityKeyPair
@@ -154,8 +155,9 @@ def init(
 @app.command()
 def trust(
     device_id: str = typer.Argument(..., help="Device ID to reset trust for"),
-    storage_dir: str = typer.Option("~/.securesync", "--storage-dir",
-                                     help="Directory containing config and identity"),
+    storage_dir: str = typer.Option(
+        "~/.securesync", "--storage-dir", help="Directory containing config and identity"
+    ),
 ) -> None:
     """Reset trust for a previously-seen peer device."""
     import json as _json
@@ -179,8 +181,7 @@ def trust(
 
 @app.command()
 def daemon(
-    config_path: str = typer.Option("config.yaml", "--config", "-c",
-                                    help="Path to config file"),
+    config_path: str = typer.Option("config.yaml", "--config", "-c", help="Path to config file"),
 ) -> None:
     """Start the SecureSync synchronization daemon."""
     from securesync.main import bootstrap
@@ -198,9 +199,7 @@ def daemon(
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
-    version: bool = typer.Option(
-        None, "--version", "-V", help="Show version and exit"
-    ),
+    version: bool = typer.Option(None, "--version", "-V", help="Show version and exit"),
 ) -> None:
     """SecureSync — encrypted peer-to-peer file synchronization."""
     if version:

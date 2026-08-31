@@ -142,4 +142,3 @@ class ChunkReceiver(Protocol):
     async def receive(self) -> AsyncIterator[Chunk]:
         """Receive chunks."""
         ...
-

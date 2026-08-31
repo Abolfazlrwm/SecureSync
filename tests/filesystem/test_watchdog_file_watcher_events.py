@@ -192,18 +192,14 @@ class TestMoveAndRename:
         # Accept either a MOVED event or DELETED+CREATED pair (Windows behavior).
         def _file_disappeared_and_reappeared(events: list[FileSystemEvent]) -> bool:
             moved = any(
-                e.event_type is FileSystemEventType.MOVED
-                and e.src_path == original
-                for e in events
+                e.event_type is FileSystemEventType.MOVED and e.src_path == original for e in events
             )
             deleted = any(
-                e.event_type is FileSystemEventType.DELETED
-                and e.src_path == original
+                e.event_type is FileSystemEventType.DELETED and e.src_path == original
                 for e in events
             )
             created_elsewhere = any(
-                e.event_type is FileSystemEventType.CREATED
-                and e.src_path == destination
+                e.event_type is FileSystemEventType.CREATED and e.src_path == destination
                 for e in events
             )
             return moved or (deleted and created_elsewhere)
@@ -219,13 +215,11 @@ class TestMoveAndRename:
             assert moved.is_rename is False
         else:
             deleted = any(
-                e.event_type is FileSystemEventType.DELETED
-                and e.src_path == original
+                e.event_type is FileSystemEventType.DELETED and e.src_path == original
                 for e in events
             )
             created = any(
-                e.event_type is FileSystemEventType.CREATED
-                and e.src_path == destination
+                e.event_type is FileSystemEventType.CREATED and e.src_path == destination
                 for e in events
             )
             assert deleted, "Expected DELETED event for original path"

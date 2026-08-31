@@ -180,9 +180,7 @@ class X25519Handshake:
 
         await self._verify_and_trust(response, salt + response["public_key"])
 
-        shared_secret = self._key_exchange.derive_shared_secret(
-            private_key, response["public_key"]
-        )
+        shared_secret = self._key_exchange.derive_shared_secret(private_key, response["public_key"])
         key_1, key_2 = self._session_keys.derive_session_keys(shared_secret, salt)
         logger.info("handshake_completed_as_initiator", peer_device_id=response["device_id"])
         return HandshakeResult(
@@ -231,9 +229,7 @@ class X25519Handshake:
             },
         )
 
-        shared_secret = self._key_exchange.derive_shared_secret(
-            private_key, request["public_key"]
-        )
+        shared_secret = self._key_exchange.derive_shared_secret(private_key, request["public_key"])
         key_1, key_2 = self._session_keys.derive_session_keys(shared_secret, request["salt"])
         logger.info("handshake_completed_as_responder", peer_device_id=request["device_id"])
         # Responder: swapped relative to the initiator, so each side's

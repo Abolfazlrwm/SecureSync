@@ -68,11 +68,7 @@ def make_chunk(
     hashing runs).
     """
     data = bytes(range(256)) * (size // 256) + bytes(range(size % 256))
-    hash_obj = (
-        ChunkHash(algorithm=ChunkAlgorithm.SHA256, digest=digest)
-        if digest
-        else None
-    )
+    hash_obj = ChunkHash(algorithm=ChunkAlgorithm.SHA256, digest=digest) if digest else None
     metadata = ChunkMetadata(
         chunk_id=f"chunk-{index}",
         index=index,

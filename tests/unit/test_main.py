@@ -150,9 +150,7 @@ class TestBootstrapWiring:
         await _run_and_stop(config_path)
         assert identity_file.read_bytes() == first_identity_bytes
 
-    async def test_inbound_handshake_is_drained_into_session_store(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_inbound_handshake_is_drained_into_session_store(self, tmp_path: Path) -> None:
         """A real peer connecting in exercises `_drain_inbound_handshakes`.
 
         This is the one piece of `bootstrap`'s wiring that only runs

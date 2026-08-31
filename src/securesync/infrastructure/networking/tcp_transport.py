@@ -264,9 +264,9 @@ class TcpTransferTransport(TransferTransport):
                 relative_path=str(packet.payload["relative_path"]),
                 total_chunks=int(packet.payload["total_chunks"]),
                 chunk=self._chunk_from_payload(packet.payload),
-                version_vector=VersionVector(dict(version_counters))
-                if version_counters is not None
-                else None,
+                version_vector=(
+                    VersionVector(dict(version_counters)) if version_counters is not None else None
+                ),
             )
 
     @staticmethod

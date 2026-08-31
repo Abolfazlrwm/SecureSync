@@ -152,6 +152,7 @@ class CollectingObserver:
         Raises:
             TimeoutError: If the predicate never becomes true in time.
         """
+
         async def _wait_until_true() -> None:
             while not predicate(self.events):
                 await self._queue.get()

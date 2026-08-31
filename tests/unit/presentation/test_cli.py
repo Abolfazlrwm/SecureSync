@@ -170,9 +170,7 @@ class TestInitCommand:
 
 class TestTrustCommand:
     def test_no_trust_file_exits_with_error(self, tmp_path: Path) -> None:
-        result = runner.invoke(
-            app, ["trust", "device-a", "--storage-dir", str(tmp_path / "nope")]
-        )
+        result = runner.invoke(app, ["trust", "device-a", "--storage-dir", str(tmp_path / "nope")])
 
         assert result.exit_code == 1
         assert "No trusted peers file found" in result.stdout
@@ -182,16 +180,12 @@ class TestTrustCommand:
         storage.mkdir()
         (storage / "trusted_peers.json").write_text(json.dumps({"device-a": "abcd1234"}))
 
-        result = runner.invoke(
-            app, ["trust", "device-unknown", "--storage-dir", str(storage)]
-        )
+        result = runner.invoke(app, ["trust", "device-unknown", "--storage-dir", str(storage)])
 
         assert result.exit_code == 1
         assert "not in the trust store" in result.stdout
         # Untouched: the known device is still there.
-        assert json.loads((storage / "trusted_peers.json").read_text()) == {
-            "device-a": "abcd1234"
-        }
+        assert json.loads((storage / "trusted_peers.json").read_text()) == {"device-a": "abcd1234"}
 
     def test_removes_known_device(self, tmp_path: Path) -> None:
         storage = tmp_path / "storage"

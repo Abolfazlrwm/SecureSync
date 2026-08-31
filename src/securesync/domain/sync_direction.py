@@ -38,10 +38,10 @@ from securesync.domain.conflict import VersionVector
 class SyncDirection(StrEnum):
     """The direction a single file's sync should take with a single peer."""
 
-    PUSH = "push"          # Send our newer version to the peer.
-    PULL = "pull"          # Fetch the peer's newer version.
+    PUSH = "push"  # Send our newer version to the peer.
+    PULL = "pull"  # Fetch the peer's newer version.
     CONFLICT = "conflict"  # Versions are concurrent; defer to merge strategy.
-    NOOP = "noop"          # Nothing to transfer; vectors match or both empty.
+    NOOP = "noop"  # Nothing to transfer; vectors match or both empty.
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,9 +94,7 @@ class SyncDirectionResolver:
                     SyncDirection.PUSH,
                     "peer has no manifest for this file; pushing ours",
                 )
-            return SyncDirectionDecision(
-                SyncDirection.NOOP, "neither side has the file"
-            )
+            return SyncDirectionDecision(SyncDirection.NOOP, "neither side has the file")
 
         # Both version vectors present: this is the fast path.
         if local_version is not None and remote_version is not None:
@@ -179,16 +177,12 @@ class SyncDirectionResolver:
         local_hashes: set[str] = set()
         if local_collection is not None:
             local_hashes = {
-                m.chunk_hash.digest
-                for m in local_collection.chunks
-                if m.chunk_hash is not None
+                m.chunk_hash.digest for m in local_collection.chunks if m.chunk_hash is not None
             }
         remote_hashes: set[str] = set()
         if remote_collection is not None:
             remote_hashes = {
-                m.chunk_hash.digest
-                for m in remote_collection.chunks
-                if m.chunk_hash is not None
+                m.chunk_hash.digest for m in remote_collection.chunks if m.chunk_hash is not None
             }
 
         local_only = local_hashes - remote_hashes
@@ -200,11 +194,7 @@ class SyncDirectionResolver:
                 "both sides have chunks the other lacks",
             )
         if local_only:
-            return SyncDirectionDecision(
-                SyncDirection.PUSH, "local has chunks remote doesn't"
-            )
+            return SyncDirectionDecision(SyncDirection.PUSH, "local has chunks remote doesn't")
         if remote_only:
-            return SyncDirectionDecision(
-                SyncDirection.PULL, "remote has chunks local doesn't"
-            )
+            return SyncDirectionDecision(SyncDirection.PULL, "remote has chunks local doesn't")
         return SyncDirectionDecision(SyncDirection.NOOP, "chunk sets are equal")

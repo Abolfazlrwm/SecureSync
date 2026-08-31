@@ -59,6 +59,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install ".[dev]"
       - name: Run tests
+        # GitHub's Windows runners default `run:` steps to PowerShell,
+        # not bash -- this script's `if [ "$code" -eq 5 ]` syntax is
+        # bash-only and silently failed with a ParserError on every
+        # windows-latest run until this was added (never caught before
+        # because this workflow had never actually been run on a real
+        # GitHub-hosted Windows runner).
+        shell: bash
         run: |
           set +e
           pytest --cov-report=xml
@@ -87,6 +94,7 @@ jobs:
           python-version: "3.12"
       - run: pip install ".[dev]"
       - name: Run security test suite
+        shell: bash
         run: |
           set +e
           pytest tests/security -v

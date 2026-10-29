@@ -112,9 +112,7 @@ async def read_length_prefixed(
 
     (length,) = struct.unpack(_LENGTH_PREFIX_FORMAT, prefix)
     if length > max_size:
-        raise OversizedMessageError(
-            f"declared message length {length} exceeds maximum {max_size}"
-        )
+        raise OversizedMessageError(f"declared message length {length} exceeds maximum {max_size}")
 
     try:
         return await asyncio.wait_for(reader.readexactly(length), read_timeout)

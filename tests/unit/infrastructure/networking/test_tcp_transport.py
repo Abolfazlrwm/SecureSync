@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from cryptography.exceptions import InvalidTag
 
@@ -286,3 +288,50 @@ class TestReceivePushesOverRealSockets:
         finally:
             await transport_a.stop()
             await transport_b.stop()
+
+
+class TestConnectionLimits:
+    """Tests for the DoS defenses added in Step 1c."""
+
+    async def test_refuses_connection_when_at_capacity(self) -> None:
+        """A peer cannot open an unbounded number of inbound sockets."""
+        from securesync.infrastructure.networking.message_io import MAX_CONCURRENT_CONNECTIONS
+
+        transport = TcpTransferTransport("dev-a", "127.0.0.1", 0, AesGcmCipher(), SessionKeyStore())
+        transport._active_connections = MAX_CONCURRENT_CONNECTIONS
+
+        class _FakeReader:
+            async def readexactly(self, n: int) -> bytes:  # pragma: no cover
+                raise AssertionError("should not read when at connection cap")
+
+        class _FakeWriter:
+            def __init__(self) -> None:
+                self.closed = False
+                self._wait_closed_called = False
+
+            def close(self) -> None:
+                self.closed = True
+
+            async def wait_closed(self) -> None:
+                self._wait_closed_called = True
+
+        fake_reader = _FakeReader()
+        fake_writer = _FakeWriter()
+
+        await transport._handle_connection(fake_reader, fake_writer)  # type: ignore[arg-type]
+
+        assert fake_writer.closed
+        assert fake_writer._wait_closed_called
+        assert transport._active_connections == MAX_CONCURRENT_CONNECTIONS
+
+    async def test_inbox_full_drops_envelope(self) -> None:
+        """A flooding peer cannot grow the unbounded inbound queue."""
+
+        transport = TcpTransferTransport("dev-a", "127.0.0.1", 0, AesGcmCipher(), SessionKeyStore())
+        transport._inbox = asyncio.Queue(maxsize=1)
+        transport._inbox.put_nowait(b"existing")
+
+        transport._try_enqueue(b"overflow")
+
+        assert transport._inbox.qsize() == 1
+        assert transport._inbox.get_nowait() == b"existing"

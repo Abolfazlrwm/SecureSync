@@ -33,6 +33,7 @@ from securesync.domain.conflict import VersionVector
 from securesync.domain.events import FileSystemEvent
 from securesync.domain.identity import IdentityKeyPair, IdentityProvider, TrustedPeerRepository
 from securesync.domain.manifest_exchange import ManifestExchangeTransport, ManifestWithVersion
+from securesync.domain.metadata import FileMetadata, MetadataRepository
 from securesync.domain.networking import Peer
 from securesync.domain.transfer import IncomingPush, TransferTransport
 from securesync.domain.watcher import FileSystemEventObserver, FileWatcher
@@ -322,6 +323,47 @@ class FakeTrustedPeerRepository(TrustedPeerRepository):
     async def trust(self, device_id: str, public_key: bytes) -> None:
         """Pin ``public_key`` as trusted for ``device_id``."""
         self._store[device_id] = public_key
+
+
+class FakeMetadataRepository(MetadataRepository):
+    """In-memory fake ``MetadataRepository`` — a dict keyed by file path.
+
+    ``saved`` keeps every ``FileMetadata`` ever written, in order, so a
+    test can assert *whether* a save happened (e.g. that a rejected
+    push never recorded metadata for the file it tried to create)
+    without reaching into private state.
+    """
+
+    def __init__(self) -> None:
+        """Initialize with an empty store."""
+        self._store: dict[str, FileMetadata] = {}
+        self.saved: list[FileMetadata] = []
+
+    async def save_file_metadata(self, metadata: FileMetadata) -> None:
+        """Record ``metadata``, keyed by its ``file_path``."""
+        self._store[metadata.file_path] = metadata
+        self.saved.append(metadata)
+
+    async def get_file_metadata(self, file_path: str) -> FileMetadata | None:
+        """Return the metadata for ``file_path``, if any."""
+        return self._store.get(file_path)
+
+    async def list_all_files(self) -> list[FileMetadata]:
+        """Return every recorded ``FileMetadata``."""
+        return list(self._store.values())
+
+    async def delete_file_metadata(self, file_path: str) -> None:
+        """Forget ``file_path``."""
+        self._store.pop(file_path, None)
+
+    async def begin_transaction(self) -> None:
+        """No-op: this fake has nothing to transact over."""
+
+    async def commit(self) -> None:
+        """No-op: this fake has nothing to transact over."""
+
+    async def rollback(self) -> None:
+        """No-op: this fake has nothing to transact over."""
 
 
 class FakeManifestExchangeTransport(ManifestExchangeTransport):

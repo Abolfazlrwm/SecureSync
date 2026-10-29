@@ -32,7 +32,7 @@ from typing import Any, Protocol
 import msgpack  # type: ignore[import-untyped]
 import structlog
 
-from securesync.core.protocol import Packet, PacketType, make_header
+from securesync.core.protocol import Packet, PacketType, ProtocolError, make_header
 from securesync.domain.chunk import Chunk, ChunkAlgorithm, ChunkHash, ChunkMetadata
 from securesync.domain.chunking import ChunkRepository
 from securesync.domain.conflict import VersionVector
@@ -46,13 +46,16 @@ from securesync.infrastructure.chunking.file_chunk_repository import (
     collection_from_dict,
     collection_to_dict,
 )
+from securesync.infrastructure.networking.message_io import (
+    _LENGTH_PREFIX_FORMAT,
+    MAX_CONCURRENT_CONNECTIONS,
+    MAX_MESSAGE_SIZE,
+    read_length_prefixed,
+)
 from securesync.infrastructure.networking.session_key_store import SessionKeyStore
 from securesync.shared.safe_path import UnsafePathError, resolve_within
 
 logger = structlog.get_logger(__name__)
-
-_LENGTH_PREFIX_FORMAT = ">I"
-_LENGTH_PREFIX_SIZE = struct.calcsize(_LENGTH_PREFIX_FORMAT)
 
 
 class _MetadataLookup(Protocol):
@@ -122,6 +125,7 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
         self._sync_root = sync_root
         self._metadata_lookup = metadata_lookup
         self._message_id = 0
+        self._active_connections = 0
         self._server: asyncio.Server | None = None
 
     def _next_message_id(self) -> int:
@@ -255,6 +259,14 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         """Answer one inbound manifest or chunk-data request on its own connection."""
+        if self._active_connections >= MAX_CONCURRENT_CONNECTIONS:
+            logger.warning("manifest_refused_too_many", active=self._active_connections)
+            writer.close()
+            with contextlib.suppress(ConnectionError):
+                await writer.wait_closed()
+            return
+
+        self._active_connections += 1
         try:
             request = await self._read_message(reader)
             session = self._session_keys.get(request["device_id"])
@@ -284,7 +296,12 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
             )
             envelope = self._pack_envelope(response_encrypted)
             await self._write_message(writer, {"envelope": envelope})
-        except (asyncio.IncompleteReadError, ConnectionError, KeyError) as e:
+        except (
+            asyncio.IncompleteReadError,
+            ConnectionError,
+            KeyError,
+            ProtocolError,
+        ) as e:
             logger.warning("manifest_exchange_request_failed", error=str(e))
         except UnsafePathError as e:
             # A peer asked for a path outside our sync root. Dropping
@@ -292,6 +309,7 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
             # the request never reaches the chunk repository.
             logger.warning("manifest_exchange_path_rejected", error=str(e))
         finally:
+            self._active_connections -= 1
             writer.close()
             with contextlib.suppress(ConnectionError):
                 await writer.wait_closed()
@@ -380,9 +398,7 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
     @staticmethod
     async def _read_message(reader: asyncio.StreamReader) -> dict[str, Any]:
         """Read and decode a length-prefixed, msgpack-encoded message."""
-        length_bytes = await reader.readexactly(_LENGTH_PREFIX_SIZE)
-        (length,) = struct.unpack(_LENGTH_PREFIX_FORMAT, length_bytes)
-        data = await reader.readexactly(length)
+        data = await read_length_prefixed(reader, max_size=MAX_MESSAGE_SIZE)
         result: dict[str, Any] = msgpack.unpackb(data, raw=False)
         return result
 

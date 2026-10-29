@@ -47,6 +47,7 @@ from securesync.infrastructure.chunking.file_chunk_repository import (
     collection_to_dict,
 )
 from securesync.infrastructure.networking.session_key_store import SessionKeyStore
+from securesync.shared.safe_path import UnsafePathError, resolve_within
 
 logger = structlog.get_logger(__name__)
 
@@ -285,6 +286,11 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
             await self._write_message(writer, {"envelope": envelope})
         except (asyncio.IncompleteReadError, ConnectionError, KeyError) as e:
             logger.warning("manifest_exchange_request_failed", error=str(e))
+        except UnsafePathError as e:
+            # A peer asked for a path outside our sync root. Dropping
+            # the connection (rather than answering) is the whole point:
+            # the request never reaches the chunk repository.
+            logger.warning("manifest_exchange_path_rejected", error=str(e))
         finally:
             writer.close()
             with contextlib.suppress(ConnectionError):
@@ -386,12 +392,19 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
         return payload.nonce + payload.tag + payload.ciphertext
 
     def _safe_resolve(self, relative_path: str) -> Path:
-        """Resolve a relative path against sync_root, rejecting path traversal."""
-        resolved = (self._sync_root / relative_path).resolve()
-        sync_root_resolved = self._sync_root.resolve()
-        if not str(resolved).startswith(str(sync_root_resolved) + os.sep):
-            raise ValueError(f"Path traversal rejected: {relative_path!r} escapes sync root")
-        return resolved
+        """Resolve a peer-supplied relative path against the sync root.
+
+        Delegates to :func:`~securesync.shared.safe_path.resolve_within`
+        so this transport and the push receiver enforce exactly the same
+        rules. This previously used a ``str.startswith`` prefix
+        comparison, which is both weaker than it looks (``/srv/sync-evil``
+        passes a check against ``/srv/sync``) and inconsistent with the
+        push path, which had no check at all.
+
+        Raises:
+            UnsafePathError: If the path would resolve outside the sync root.
+        """
+        return resolve_within(self._sync_root, relative_path)
 
     @staticmethod
     def _unpack_envelope(envelope: bytes) -> EncryptedPayload:

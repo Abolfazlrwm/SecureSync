@@ -153,3 +153,37 @@ class TestPeerAuthentication:
             assert server.results.empty()
         finally:
             await server.stop()
+
+
+class TestConnectionLimits:
+    """DoS defenses: the handshake server refuses excess connections."""
+
+    async def test_refuses_connection_when_at_capacity(self, tmp_path: Path) -> None:
+        from securesync.infrastructure.networking.message_io import MAX_CONCURRENT_CONNECTIONS
+
+        server = HandshakeServer(_handshake("dev-b", tmp_path))
+        server._active_connections = MAX_CONCURRENT_CONNECTIONS
+
+        class _FakeReader:
+            async def readexactly(self, n: int) -> bytes:  # pragma: no cover
+                raise AssertionError("should not read when at connection cap")
+
+        class _FakeWriter:
+            def __init__(self) -> None:
+                self.closed = False
+                self._wait_closed_called = False
+
+            def close(self) -> None:
+                self.closed = True
+
+            async def wait_closed(self) -> None:
+                self._wait_closed_called = True
+
+        fake_reader = _FakeReader()
+        fake_writer = _FakeWriter()
+
+        await server._handle_connection(fake_reader, fake_writer)  # type: ignore[arg-type]
+
+        assert fake_writer.closed
+        assert fake_writer._wait_closed_called
+        assert server._active_connections == MAX_CONCURRENT_CONNECTIONS

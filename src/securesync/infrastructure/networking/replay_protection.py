@@ -266,3 +266,131 @@ def check_timestamp_skew(
 def now_ms() -> int:
     """Return the current wall-clock time in milliseconds."""
     return int(time.time() * 1000)
+
+
+# --- Replay window ------------------------------------------------------------
+
+#: Default anti-replay window size (number of counters tracked around the
+#: highest seen). RFC-4303 style: counters within this band of the highest
+#: accepted counter are tolerated (out-of-order delivery), outside it they are
+#: rejected as too-old or implausibly far in the future.
+DEFAULT_REPLAY_WINDOW_SIZE: Final = 128
+
+
+class AntiReplayWindow:
+    """RFC-4303-style sliding replay window backed by a fixed-size bitmask.
+
+    The window accepts counters in the band
+    ``[highest - window + 1, highest + window]`` that have not already
+    been seen. ``counter == 0`` is always rejected (a sender's counters
+    start at 1).
+
+    The bitmask has a fixed number of slots (``2 * window + 1``), so memory
+    use is bounded regardless of how many packets flow; the window slides
+    forward as the highest accepted counter grows, forgetting counters that
+    fall off the low end.
+
+    Design contract (Step 1d, amendment 2):
+
+    * :meth:`would_accept` is a **pure** check — it never mutates state.
+      The transport runs it *before* AEAD decryption, so a malformed or
+      replayed packet cannot trigger any state change by reaching this far.
+    * :meth:`accept` is the **only** mutating operation and is an atomic
+      check-and-set: it returns ``False`` (and changes nothing) if the
+      counter would be rejected, otherwise marks it and advances the window.
+    * There is deliberately **no** ``revoke()``: a confirmed/accepted counter
+      stays accepted forever (you cannot "un-accept" a packet), which is what
+      makes replay impossible.
+    """
+
+    def __init__(self, window_size: int = DEFAULT_REPLAY_WINDOW_SIZE) -> None:
+        """Initialize an empty window.
+
+        Args:
+            window_size: Number of counters tracked on either side of the
+                highest seen. Must be positive.
+
+        Raises:
+            ReplayProtectionError: If ``window_size`` is not positive.
+        """
+        if window_size <= 0:
+            raise ReplayProtectionError("window_size must be positive")
+        self._window = window_size
+        self._slots = 2 * window_size + 1
+        self._bits: bytearray = bytearray((self._slots + 7) // 8)
+        self._highest = 0
+        # Invariant: _base == _highest - _window + 1. The lowest counter still
+        # representable in the bitmask.
+        self._base = 1 - window_size
+
+    @property
+    def highest_accepted(self) -> int:
+        """The highest counter this window has ever accepted (0 = none)."""
+        return self._highest
+
+    def _slot(self, counter: int) -> int:
+        return counter - self._base
+
+    def _is_set(self, slot: int) -> bool:
+        return bool(self._bits[slot >> 3] & (1 << (slot & 7)))
+
+    def _set(self, slot: int) -> None:
+        self._bits[slot >> 3] |= 1 << (slot & 7)
+
+    def would_accept(self, counter: int) -> bool:
+        """Pure check: would ``accept(counter)`` succeed right now?
+
+        Never mutates state. Rejects ``counter <= 0``, counters more than
+        ``window`` above the highest seen, counters older than the lowest
+        still remembered, and already-seen counters.
+        """
+        if counter <= 0:
+            return False
+        if counter > self._highest + self._window:
+            return False
+        if counter < self._highest - self._window + 1:
+            return False
+        slot = self._slot(counter)
+        if slot < 0 or slot >= self._slots:
+            return False
+        return not self._is_set(slot)
+
+    def accept(self, counter: int) -> bool:
+        """Atomically accept ``counter`` if :meth:`would_accept` is true.
+
+        Returns:
+            ``True`` if the counter was newly accepted, ``False`` if it was
+            rejected (duplicate, too old, too new, or ``<= 0``). The only
+            state change happens on ``True``.
+        """
+        if not self.would_accept(counter):
+            return False
+        if counter > self._highest:
+            self._slide(counter - self._window + 1)
+            self._highest = counter
+        self._set(self._slot(counter))
+        return True
+
+    def _slide(self, new_base: int) -> None:
+        """Slide the window forward so its low end becomes ``new_base``.
+
+        Right-shifts the bitmask by ``new_base - _base`` slots: a bit for
+        counter ``v`` moves from slot ``v - old_base`` to ``v - new_base``.
+        Counters that fall below ``new_base`` are dropped (forgotten, because
+        they are now outside the window's lower bound), and the vacated high
+        slots are cleared.
+        """
+        delta = new_base - self._base
+        if delta <= 0:
+            self._base = new_base
+            return
+        old = self._bits
+        new = bytearray(len(old))
+        total = self._slots
+        for i in range(total):
+            if (old[i >> 3] >> (i & 7)) & 1:
+                j = i - delta
+                if 0 <= j < total:
+                    new[j >> 3] |= 1 << (j & 7)
+        self._bits = new
+        self._base = new_base

@@ -173,6 +173,9 @@ async def bootstrap(
         LocalFileReconstructor(),
         metadata_repo,
         device_id,
+        # Verifies every arriving chunk against the digest the sender
+        # declared before a single byte is written (ADR-0027).
+        SHA256HashProvider(),
     )
     receive_pushes_task = asyncio.create_task(receive_pushed_files_use_case.run_forever())
 

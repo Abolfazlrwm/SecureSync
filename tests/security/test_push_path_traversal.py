@@ -22,6 +22,7 @@ from securesync.application.use_cases.receive_pushed_files import ReceivePushedF
 from securesync.domain.chunk import Chunk, ChunkAlgorithm, ChunkHash, ChunkMetadata
 from securesync.domain.transfer import IncomingPush
 from securesync.infrastructure.chunking.local_file_reconstructor import LocalFileReconstructor
+from securesync.infrastructure.chunking.sha256_hash_provider import SHA256HashProvider
 from tests.doubles import FakeMetadataRepository, FakeTransferTransport
 from tests.platform import symlink_dir_or_skip
 
@@ -72,6 +73,7 @@ def _receiver(
         file_reconstructor=LocalFileReconstructor(),
         metadata_repo=metadata,
         own_device_id=_DEVICE_ID,
+        hasher=SHA256HashProvider(),
     )
     return use_case, metadata
 

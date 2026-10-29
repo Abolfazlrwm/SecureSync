@@ -299,9 +299,7 @@ class ReceivePushedFilesUseCase:
                 f"declared {declared}, computed {actual}"
             )
 
-    async def _finalize(
-        self, relative_path: str, destination: Path, pending: _PendingFile
-    ) -> None:
+    async def _finalize(self, relative_path: str, destination: Path, pending: _PendingFile) -> None:
         """Commit the assembled file atomically, then record its metadata."""
         self._file_reconstructor.commit_partial(destination, pending.partial)
         self._pending.pop(relative_path, None)

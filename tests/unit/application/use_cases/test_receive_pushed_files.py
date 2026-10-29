@@ -62,9 +62,7 @@ def _chunk(data: bytes, *, index: int = 0, offset: int = 0) -> Chunk:
 
 
 def _push(relative_path: str, chunk: Chunk, *, total_chunks: int) -> IncomingPush:
-    return IncomingPush(
-        relative_path=relative_path, total_chunks=total_chunks, chunk=chunk
-    )
+    return IncomingPush(relative_path=relative_path, total_chunks=total_chunks, chunk=chunk)
 
 
 def _receiver(
@@ -246,9 +244,7 @@ class TestCleanup:
                 _push("second.bin", _chunk(b"AAAA", index=0), total_chunks=4),
             ]
         )
-        use_case, metadata = _receiver(
-            sync_root, transport, limits=PushLimits(max_pending_files=1)
-        )
+        use_case, metadata = _receiver(sync_root, transport, limits=PushLimits(max_pending_files=1))
 
         await use_case.run_forever()
 

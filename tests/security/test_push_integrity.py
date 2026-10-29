@@ -60,9 +60,7 @@ def _push(
     *,
     total_chunks: int = 1,
 ) -> IncomingPush:
-    return IncomingPush(
-        relative_path=relative_path, total_chunks=total_chunks, chunk=chunk
-    )
+    return IncomingPush(relative_path=relative_path, total_chunks=total_chunks, chunk=chunk)
 
 
 def _receiver(

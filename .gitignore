@@ -10,19 +10,31 @@ venv/
 
 # Testing / coverage
 .pytest_cache/
+.hypothesis/
 .coverage
 .coverage.*
 htmlcov/
+coverage.xml
 .mypy_cache/
 .ruff_cache/
 
 # SecureSync runtime artifacts
 *.db
 *.db-journal
+*.log
 .securesync/
 benchmarks/results/
 examples/data/**/*
 !examples/data/**/.gitkeep
+
+# Local keys / credentials -- never commit these
+*.pem
+*.key
+*.p12
+*.pfx
+id_ed25519
+id_ed25519.pub
+id_rsa
 
 # Environment
 .env

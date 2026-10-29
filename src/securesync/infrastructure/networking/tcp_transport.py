@@ -25,20 +25,22 @@ from typing import Any
 import structlog
 from cryptography.exceptions import InvalidTag
 
-from securesync.core.protocol import Packet, PacketType, make_header
+from securesync.core.protocol import Packet, PacketType, ProtocolError, make_header
 from securesync.domain.chunk import Chunk, ChunkAlgorithm, ChunkHash, ChunkMetadata
 from securesync.domain.conflict import VersionVector
 from securesync.domain.crypto import NONCE_SIZE, TAG_SIZE, AeadCipher, EncryptedPayload
 from securesync.domain.networking import Peer
 from securesync.domain.transfer import IncomingPush, TransferTransport
+from securesync.infrastructure.networking.message_io import (
+    _LENGTH_PREFIX_FORMAT,
+    INBOX_MAX_SIZE,
+    MAX_CONCURRENT_CONNECTIONS,
+    MAX_MESSAGE_SIZE,
+    read_length_prefixed,
+)
 from securesync.infrastructure.networking.session_key_store import SessionKeyStore
 
 logger = structlog.get_logger(__name__)
-
-#: Prefixes each encrypted envelope on the wire with its length, since
-#: TCP is a byte stream with no message boundaries of its own.
-_LENGTH_PREFIX_FORMAT = ">I"
-_LENGTH_PREFIX_SIZE = struct.calcsize(_LENGTH_PREFIX_FORMAT)
 
 
 class TcpTransferTransport(TransferTransport):
@@ -78,7 +80,8 @@ class TcpTransferTransport(TransferTransport):
         self._cipher = cipher
         self._session_keys = session_keys
         self._message_id = 0
-        self._inbox: asyncio.Queue[bytes] = asyncio.Queue()
+        self._inbox: asyncio.Queue[bytes] = asyncio.Queue(maxsize=INBOX_MAX_SIZE)
+        self._active_connections = 0
         self._server: asyncio.Server | None = None
 
     def _next_message_id(self) -> int:
@@ -114,15 +117,35 @@ class TcpTransferTransport(TransferTransport):
         :meth:`send_chunk`'s one-connection-per-chunk behavior — so
         this handler reads one, queues it, and closes the connection.
         """
-        try:
-            envelope = await self._read_envelope(reader)
-            await self._inbox.put(envelope)
-        except (asyncio.IncompleteReadError, ConnectionError) as e:
-            logger.warning("tcp_transport_connection_dropped", error=str(e))
-        finally:
+        if self._active_connections >= MAX_CONCURRENT_CONNECTIONS:
+            logger.warning("connection_refused_too_many", active=self._active_connections)
             writer.close()
             with contextlib.suppress(ConnectionError):
                 await writer.wait_closed()
+            return
+
+        self._active_connections += 1
+        try:
+            envelope = await self._read_envelope(reader)
+            self._try_enqueue(envelope)
+        except (
+            asyncio.IncompleteReadError,
+            ConnectionError,
+            ProtocolError,
+        ) as e:
+            logger.warning("tcp_transport_connection_dropped", error=str(e))
+        finally:
+            self._active_connections -= 1
+            writer.close()
+            with contextlib.suppress(ConnectionError):
+                await writer.wait_closed()
+
+    def _try_enqueue(self, envelope: bytes) -> None:
+        """Add an envelope to the inbox, dropping it when the inbox is full."""
+        try:
+            self._inbox.put_nowait(envelope)
+        except asyncio.QueueFull:
+            logger.warning("inbox_full_dropping_envelope", maxsize=INBOX_MAX_SIZE)
 
     async def send_chunk(
         self,
@@ -272,9 +295,7 @@ class TcpTransferTransport(TransferTransport):
     @staticmethod
     async def _read_envelope(reader: asyncio.StreamReader) -> bytes:
         """Read one length-prefixed envelope from a stream."""
-        length_bytes = await reader.readexactly(_LENGTH_PREFIX_SIZE)
-        (length,) = struct.unpack(_LENGTH_PREFIX_FORMAT, length_bytes)
-        return await reader.readexactly(length)
+        return await read_length_prefixed(reader, max_size=MAX_MESSAGE_SIZE)
 
     @staticmethod
     def _pack_envelope(payload: EncryptedPayload) -> bytes:

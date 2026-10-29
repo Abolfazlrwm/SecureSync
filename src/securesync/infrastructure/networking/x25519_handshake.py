@@ -32,18 +32,23 @@ from typing import Any
 import msgpack  # type: ignore[import-untyped]
 import structlog
 
+from securesync.core.protocol import ProtocolError
 from securesync.domain.crypto import KeyExchangeProvider, SessionKeyProvider
 from securesync.domain.identity import IdentityKeyPair, IdentityProvider, TrustedPeerRepository
 from securesync.domain.identity_exceptions import (
     InvalidHandshakeSignatureError,
     PeerIdentityMismatchError,
 )
+from securesync.infrastructure.networking.message_io import (
+    _LENGTH_PREFIX_FORMAT,
+    MAX_CONCURRENT_CONNECTIONS,
+    MAX_HANDSHAKE_MESSAGE_SIZE,
+    read_length_prefixed,
+)
 
 logger = structlog.get_logger(__name__)
 
 _SALT_SIZE = 16
-_LENGTH_PREFIX_FORMAT = ">I"
-_LENGTH_PREFIX_SIZE = struct.calcsize(_LENGTH_PREFIX_FORMAT)
 
 
 class HandshakeResult:
@@ -283,9 +288,7 @@ class X25519Handshake:
     @staticmethod
     async def _read_message(reader: asyncio.StreamReader) -> dict[str, Any]:
         """Read and decode a length-prefixed, msgpack-encoded handshake message."""
-        length_bytes = await reader.readexactly(_LENGTH_PREFIX_SIZE)
-        (length,) = struct.unpack(_LENGTH_PREFIX_FORMAT, length_bytes)
-        data = await reader.readexactly(length)
+        data = await read_length_prefixed(reader, max_size=MAX_HANDSHAKE_MESSAGE_SIZE)
         result: dict[str, Any] = msgpack.unpackb(data, raw=False)
         return result
 
@@ -308,6 +311,7 @@ class HandshakeServer:
         """
         self._handshake = handshake
         self._server: asyncio.Server | None = None
+        self._active_connections = 0
         self.results: asyncio.Queue[HandshakeResult] = asyncio.Queue()
 
     async def start(self, host: str, port: int) -> None:
@@ -332,6 +336,14 @@ class HandshakeServer:
     async def _handle_connection(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
+        if self._active_connections >= MAX_CONCURRENT_CONNECTIONS:
+            logger.warning("handshake_refused_too_many", active=self._active_connections)
+            writer.close()
+            with contextlib.suppress(ConnectionError):
+                await writer.wait_closed()
+            return
+
+        self._active_connections += 1
         try:
             result = await self._handshake.accept(reader, writer)
             await self.results.put(result)
@@ -341,9 +353,11 @@ class HandshakeServer:
             KeyError,
             InvalidHandshakeSignatureError,
             PeerIdentityMismatchError,
+            ProtocolError,
         ) as e:
             logger.warning("handshake_failed", error=str(e), error_type=type(e).__name__)
         finally:
+            self._active_connections -= 1
             writer.close()
             with contextlib.suppress(ConnectionError):
                 await writer.wait_closed()

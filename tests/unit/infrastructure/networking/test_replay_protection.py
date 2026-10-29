@@ -11,6 +11,7 @@ from securesync.infrastructure.networking.replay_protection import (
     ROLE_INITIATOR,
     ROLE_RESPONDER,
     SESSION_ID_SIZE,
+    AntiReplayWindow,
     FrameDecodeError,
     ReplayProtectionError,
     build_aad,
@@ -118,3 +119,63 @@ class TestTimestampSkew:
     def test_outside_skew_fails(self) -> None:
         assert not check_timestamp_skew(1000, 1000 + 300_001, max_skew_ms=300_000)
         assert not check_timestamp_skew(1000, 1000 - 300_001, max_skew_ms=300_000)
+
+
+class TestAntiReplayWindow:
+    def test_first_counter_accepted_then_duplicate_rejected(self) -> None:
+        w = AntiReplayWindow(8)
+        assert w.accept(1) is True
+        assert w.accept(1) is False  # duplicate
+
+    def test_counter_zero_is_always_rejected(self) -> None:
+        w = AntiReplayWindow(8)
+        assert w.would_accept(0) is False
+        assert w.accept(0) is False
+
+    def test_would_accept_is_pure(self) -> None:
+        w = AntiReplayWindow(8)
+        # Calling would_accept does not mutate: a far-but-in-window counter
+        # is still accepted afterwards and highest is still 0.
+        assert w.would_accept(5) is True
+        assert w.would_accept(5) is True
+        assert w.highest_accepted == 0
+        assert w.accept(5) is True
+        assert w.highest_accepted == 5
+
+    def test_out_of_order_within_window(self) -> None:
+        w = AntiReplayWindow(8)
+        assert w.accept(1) is True
+        assert w.accept(3) is True  # out of order, still within window
+        assert w.accept(2) is True  # fills the gap
+        assert w.accept(3) is False  # duplicate
+        assert w.accept(9) is True  # within highest(3) + window(8)
+        assert w.accept(11) is True  # advances the highest accepted counter
+        # 2 is now below the window's lower bound and must be rejected.
+        assert w.accept(2) is False  # too old (fell below the window)
+
+    def test_too_old_counter_rejected_after_slide(self) -> None:
+        w = AntiReplayWindow(2)
+        assert w.accept(1) is True
+        assert w.accept(3) is True
+        # 1 is now older than highest(3) - window(2) + 1 == 2
+        assert w.would_accept(1) is False
+        assert w.accept(1) is False
+
+    def test_far_future_counter_does_not_advance_window(self) -> None:
+        w = AntiReplayWindow(8)
+        # A counter far beyond highest + window is rejected as too-new and
+        # must NOT advance the window (otherwise an attacker could shift it).
+        assert w.would_accept(10_000) is False
+        assert w.accept(10_000) is False
+        assert w.highest_accepted == 0
+
+    def test_concurrent_identical_packets_accepted_exactly_once(self) -> None:
+        w = AntiReplayWindow(8)
+        assert w.accept(5) is True
+        # Two copies of the same counter arriving "at once" — only one wins.
+        assert w.accept(5) is False
+        assert w.accept(5) is False
+
+    def test_invalid_window_size_rejected(self) -> None:
+        with pytest.raises(ReplayProtectionError):
+            AntiReplayWindow(0)

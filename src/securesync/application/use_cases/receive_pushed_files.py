@@ -12,6 +12,12 @@ lifetime of the application, draining
 `TransferTransport.receive_pushes()` and writing each arriving chunk
 into its correct position in the target file via `FileReconstructor`.
 See ``docs/adr/0026-push-receiver.md``.
+
+Because a push is unsolicited, its `relative_path` is chosen entirely
+by the sender and must be treated as hostile input: it is resolved
+through :func:`~securesync.shared.safe_path.resolve_within`, which
+guarantees the write target stays inside the sync root. See
+``docs/adr/0027-security-audit-and-hardening.md``.
 """
 
 from __future__ import annotations
@@ -25,7 +31,9 @@ import structlog
 from securesync.domain.conflict import VersionVector
 from securesync.domain.metadata import FileMetadata, MetadataRepository
 from securesync.domain.reconstruction import FileReconstructor
-from securesync.domain.transfer import TransferTransport
+from securesync.domain.transfer import IncomingPush, TransferTransport
+from securesync.shared.exceptions import ChunkEngineError
+from securesync.shared.safe_path import UnsafePathError, resolve_within
 
 logger = structlog.get_logger(__name__)
 
@@ -62,7 +70,9 @@ class ReceivePushedFilesUseCase:
         Args:
             transport: Drained via `receive_pushes()` for incoming chunks.
             sync_root: This device's sync directory — chunks are
-                reconstructed at `sync_root / relative_path`.
+                reconstructed at `sync_root / relative_path`, after
+                that path is validated to stay inside `sync_root`
+                (see `shared.safe_path`).
             file_reconstructor: Writes each chunk at its byte offset
                 within the target file.
             metadata_repo: Updated with a new `FileMetadata` once a
@@ -84,28 +94,56 @@ class ReceivePushedFilesUseCase:
         Runs until the surrounding task is cancelled (the normal way
         every background loop in this application is stopped — see
         `main.py`'s `bootstrap`). Never returns on its own.
+
+        A single malformed or hostile message is logged and dropped; it
+        never ends the loop. Everything arriving here is peer-supplied,
+        so letting one bad message raise would hand any peer a
+        permanent denial of service against this device's ability to
+        receive from *all* peers.
         """
         async for incoming in self._transport.receive_pushes():
-            destination = self._sync_root / incoming.relative_path
-            self._file_reconstructor.write_chunk_at_offset(destination, incoming.chunk)
-
-            pending = self._pending.setdefault(incoming.relative_path, _PendingFile())
-            pending.chunks_written += 1
-            if incoming.version_vector is not None:
-                pending.version_vector = (
-                    incoming.version_vector
-                    if pending.version_vector is None
-                    else pending.version_vector.merge(incoming.version_vector)
+            try:
+                await self._handle_push(incoming)
+            except (UnsafePathError, ChunkEngineError, OSError, ValueError, KeyError) as exc:
+                logger.warning(
+                    "push_rejected",
+                    relative_path=incoming.relative_path,
+                    error=str(exc),
+                    error_type=type(exc).__name__,
                 )
 
-            logger.debug(
-                "push_chunk_received",
-                relative_path=incoming.relative_path,
-                progress=f"{pending.chunks_written}/{incoming.total_chunks}",
+    async def _handle_push(self, incoming: IncomingPush) -> None:
+        """Write one arriving chunk and finalize its file once all chunks are in.
+
+        Raises:
+            UnsafePathError: If `incoming.relative_path` would resolve
+                outside the sync root. Raised before anything is
+                written.
+        """
+        # The one place a peer-supplied name becomes a local path.
+        # Validated rather than joined: `sync_root / relative_path`
+        # alone lets a peer choose any writable location on this
+        # machine (see `shared.safe_path`).
+        destination = resolve_within(self._sync_root, incoming.relative_path)
+        self._file_reconstructor.write_chunk_at_offset(destination, incoming.chunk)
+
+        pending = self._pending.setdefault(incoming.relative_path, _PendingFile())
+        pending.chunks_written += 1
+        if incoming.version_vector is not None:
+            pending.version_vector = (
+                incoming.version_vector
+                if pending.version_vector is None
+                else pending.version_vector.merge(incoming.version_vector)
             )
 
-            if pending.chunks_written >= incoming.total_chunks:
-                await self._finalize(incoming.relative_path, pending)
+        logger.debug(
+            "push_chunk_received",
+            relative_path=incoming.relative_path,
+            progress=f"{pending.chunks_written}/{incoming.total_chunks}",
+        )
+
+        if pending.chunks_written >= incoming.total_chunks:
+            await self._finalize(incoming.relative_path, pending)
 
     async def _finalize(self, relative_path: str, pending: _PendingFile) -> None:
         """Record the now-complete file's metadata and forget its progress."""

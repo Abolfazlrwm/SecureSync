@@ -18,13 +18,12 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-import pytest
-
 from securesync.application.use_cases.receive_pushed_files import ReceivePushedFilesUseCase
 from securesync.domain.chunk import Chunk, ChunkAlgorithm, ChunkHash, ChunkMetadata
 from securesync.domain.transfer import IncomingPush
 from securesync.infrastructure.chunking.local_file_reconstructor import LocalFileReconstructor
 from tests.doubles import FakeMetadataRepository, FakeTransferTransport
+from tests.platform import symlink_dir_or_skip
 
 _DEVICE_ID = "receiver"
 
@@ -122,10 +121,7 @@ class TestPushPathTraversal:
         sync_root.mkdir()
         outside = tmp_path / "outside"
         outside.mkdir()
-        try:
-            (sync_root / "link").symlink_to(outside, target_is_directory=True)
-        except (OSError, NotImplementedError):
-            pytest.skip("symlinks are not available on this platform")
+        symlink_dir_or_skip(sync_root / "link", outside)
 
         use_case, metadata = _receiver(sync_root, [_push("link/evil.txt", b"pwned")])
         await use_case.run_forever()

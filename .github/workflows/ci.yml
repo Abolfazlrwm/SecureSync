@@ -93,14 +93,14 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install ".[dev]"
+      # No exit-code-5 escape hatch here, deliberately.
+      #
+      # pytest exits 5 when it collects no tests. This job previously
+      # translated that into success, so it reported a green "Security
+      # test suite" while tests/security/ was completely empty -- the
+      # job proved nothing at all, and the green checkmark actively
+      # suggested otherwise. For this job an empty suite is a failure,
+      # not a pass: it exists solely to prove the attacks in
+      # tests/security are actually exercised.
       - name: Run security test suite
-        shell: bash
-        run: |
-          set +e
-          pytest tests/security -v
-          code=$?
-          if [ "$code" -eq 5 ]; then
-            echo "::notice::No tests collected yet (expected pre-Phase 1) — not a failure."
-            exit 0
-          fi
-          exit $code
+        run: pytest tests/security -v

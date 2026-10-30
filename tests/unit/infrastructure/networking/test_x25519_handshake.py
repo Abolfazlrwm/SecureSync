@@ -8,12 +8,13 @@ from pathlib import Path
 import pytest
 
 from securesync.infrastructure.crypto.ed25519_identity_provider import Ed25519IdentityProvider
-from securesync.infrastructure.crypto.pyca_crypto import (
-    PycaKeyExchangeProvider,
-    PycaSessionKeyProvider,
-)
+from securesync.infrastructure.crypto.pyca_crypto import PycaKeyExchangeProvider
 from securesync.infrastructure.networking.file_trusted_peer_repository import (
     FileTrustedPeerRepository,
+)
+from securesync.infrastructure.networking.replay_protection import (
+    ROLE_INITIATOR,
+    ROLE_RESPONDER,
 )
 from securesync.infrastructure.networking.x25519_handshake import (
     HandshakeServer,
@@ -30,7 +31,6 @@ def _handshake(device_id: str, storage_dir: Path) -> X25519Handshake:
         9999,  # dummy transfer_port — not exercised by these handshake-only tests
         9998,  # dummy manifest_port — not exercised by these handshake-only tests
         PycaKeyExchangeProvider(),
-        PycaSessionKeyProvider(),
         identity_provider,
         own_identity,
         trusted_peers,
@@ -76,6 +76,22 @@ class TestHandshake:
             a_result = await initiator.initiate("127.0.0.1", 19703)
 
             assert a_result.send_key != a_result.receive_key
+        finally:
+            await server.stop()
+
+    async def test_both_sides_derive_the_same_session_id_and_roles(self, tmp_path: Path) -> None:
+        """The session id is never transmitted: both sides compute it."""
+        server = HandshakeServer(_handshake("dev-b", tmp_path / "b"))
+        await server.start("127.0.0.1", 19708)
+        try:
+            initiator = _handshake("dev-a", tmp_path / "a")
+            a_result = await initiator.initiate("127.0.0.1", 19708)
+            b_result = await asyncio.wait_for(server.results.get(), timeout=2)
+
+            assert a_result.session_id == b_result.session_id
+            assert len(a_result.session_id) == 8
+            assert a_result.role == ROLE_INITIATOR
+            assert b_result.role == ROLE_RESPONDER
         finally:
             await server.stop()
 

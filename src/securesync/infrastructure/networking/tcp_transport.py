@@ -8,27 +8,29 @@ client connection is opened per outbound chunk. Confidentiality and
 integrity are provided by the same :class:`~securesync.domain.crypto.AeadCipher`
 message-level encryption `InProcessTransferTransport` uses — see
 ``docs/adr/0017-tcp-transfer-transport.md`` for why that means no
-separate TLS layer is required for this to be genuinely secure, and
-for the connection-pooling and reconnect-logic this adapter
-deliberately leaves for later.
+separate TLS layer is required for this to be genuinely secure.
+
+Step 1d moves every message onto the v2 frame
+(:mod:`securesync.infrastructure.networking.secure_channel`): the frame carries
+a plaintext ``session_id``, so an inbound message is matched to its session in
+O(1) instead of trial-decrypting against every known key, and the per-session
+anti-replay window rejects duplicates and old counters.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
-import os
 import struct
 from collections.abc import AsyncIterator
 from typing import Any
 
 import structlog
-from cryptography.exceptions import InvalidTag
 
-from securesync.core.protocol import Packet, PacketType, ProtocolError, make_header
+from securesync.core.protocol import PacketType
 from securesync.domain.chunk import Chunk, ChunkAlgorithm, ChunkHash, ChunkMetadata
 from securesync.domain.conflict import VersionVector
-from securesync.domain.crypto import NONCE_SIZE, TAG_SIZE, AeadCipher, EncryptedPayload
+from securesync.domain.crypto import AeadCipher
 from securesync.domain.networking import Peer
 from securesync.domain.transfer import IncomingPush, TransferTransport
 from securesync.infrastructure.networking.message_io import (
@@ -38,7 +40,9 @@ from securesync.infrastructure.networking.message_io import (
     MAX_MESSAGE_SIZE,
     read_length_prefixed,
 )
-from securesync.infrastructure.networking.session_key_store import SessionKeyStore
+from securesync.infrastructure.networking.replay_protection import ReplayProtectionError
+from securesync.infrastructure.networking.secure_channel import SecureChannel
+from securesync.infrastructure.networking.session_store import NoSessionError, SessionStore
 
 logger = structlog.get_logger(__name__)
 
@@ -58,36 +62,28 @@ class TcpTransferTransport(TransferTransport):
         listen_host: str,
         listen_port: int,
         cipher: AeadCipher,
-        session_keys: SessionKeyStore,
+        sessions: SessionStore,
     ) -> None:
         """Initialize the transport.
 
         Args:
-            own_device_id: This device's ID — used as associated data
-                to authenticate decryption of inbound messages.
+            own_device_id: This device's ID — used as the AAD receiver at
+                receive time and the AAD sender at send time.
             listen_host: Host/interface to accept inbound connections on.
             listen_port: Port to accept inbound connections on.
             cipher: The AEAD cipher used to encrypt and decrypt every message.
-            session_keys: Per-peer `(send_key, receive_key)` registry,
-                populated as
-                :class:`~securesync.infrastructure.networking.x25519_handshake.X25519Handshake`
-                handshakes complete — see
-                ``docs/adr/0020-multi-peer-session-keys-and-main-py-wiring.md``.
+            sessions: The negotiated sessions, shared with whatever
+                handshake machinery and manifest transport populate them.
         """
         self._own_device_id = own_device_id
         self._listen_host = listen_host
         self._listen_port = listen_port
         self._cipher = cipher
-        self._session_keys = session_keys
-        self._message_id = 0
+        self._sessions = sessions
+        self._channel = SecureChannel(own_device_id, cipher, sessions)
         self._inbox: asyncio.Queue[bytes] = asyncio.Queue(maxsize=INBOX_MAX_SIZE)
         self._active_connections = 0
         self._server: asyncio.Server | None = None
-
-    def _next_message_id(self) -> int:
-        """Return a monotonically increasing ID for request/response correlation."""
-        self._message_id += 1
-        return self._message_id
 
     async def start(self) -> None:
         """Start accepting inbound connections.
@@ -111,9 +107,9 @@ class TcpTransferTransport(TransferTransport):
     async def _handle_connection(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
-        """Read one encrypted envelope from an inbound connection and queue it.
+        """Read one frame from an inbound connection and queue it.
 
-        Each connection carries exactly one envelope — matching
+        Each connection carries exactly one frame — matching
         :meth:`send_chunk`'s one-connection-per-chunk behavior — so
         this handler reads one, queues it, and closes the connection.
         """
@@ -126,12 +122,11 @@ class TcpTransferTransport(TransferTransport):
 
         self._active_connections += 1
         try:
-            envelope = await self._read_envelope(reader)
-            self._try_enqueue(envelope)
+            frame = await self._read_frame(reader)
+            self._try_enqueue(frame)
         except (
             asyncio.IncompleteReadError,
             ConnectionError,
-            ProtocolError,
         ) as e:
             logger.warning("tcp_transport_connection_dropped", error=str(e))
         finally:
@@ -140,12 +135,12 @@ class TcpTransferTransport(TransferTransport):
             with contextlib.suppress(ConnectionError):
                 await writer.wait_closed()
 
-    def _try_enqueue(self, envelope: bytes) -> None:
-        """Add an envelope to the inbox, dropping it when the inbox is full."""
+    def _try_enqueue(self, frame: bytes) -> None:
+        """Add a frame to the inbox, dropping it when the inbox is full."""
         try:
-            self._inbox.put_nowait(envelope)
+            self._inbox.put_nowait(frame)
         except asyncio.QueueFull:
-            logger.warning("inbox_full_dropping_envelope", maxsize=INBOX_MAX_SIZE)
+            logger.warning("inbox_full_dropping_frame", maxsize=INBOX_MAX_SIZE)
 
     async def send_chunk(
         self,
@@ -169,6 +164,8 @@ class TcpTransferTransport(TransferTransport):
                 file, if known.
 
         Raises:
+            NoSessionError: If the peer has no confirmed session; the caller
+                must open a new handshake.
             OSError: If a connection to `peer` can't be established.
         """
         payload = {
@@ -187,30 +184,20 @@ class TcpTransferTransport(TransferTransport):
             "total_chunks": total_chunks,
             "version_counters": version_vector.counters if version_vector is not None else None,
         }
-        header = make_header(PacketType.CHUNK_DATA, message_id=self._next_message_id())
-        framed = Packet(header=header, payload=payload).encode()
-
-        nonce = os.urandom(NONCE_SIZE)
-        # SessionKeyStore is always populated keyed by the *other*
-        # side's device_id (see X25519SessionCoordinator.ensure_session
-        # and main.py's _drain_inbound_handshakes, both of which call
-        # `session_keys.put(result.peer_device_id, ...)`), so the
-        # lookup here must use `peer.device_id`, not our own — looking
-        # ourselves up here would only coincidentally work if we ever
-        # had a peer whose device_id equaled our own, which never
-        # happens in practice, so this silently failed on every real
-        # multi-peer send until this fix.
-        own_session = self._session_keys.get(peer.device_id)
-        encrypted = self._cipher.encrypt(
-            framed, own_session.send_key, nonce, associated_data=peer.device_id.encode("utf-8")
-        )
-        envelope = self._pack_envelope(encrypted)
+        # The session is looked up by the *peer's* device ID, never our own:
+        # the store is keyed by the other side of each conversation.
+        session = self._sessions.get_send_session(peer.device_id)
+        if session is None:
+            raise NoSessionError(
+                f"no confirmed session for {peer.device_id!r} — a handshake must complete first"
+            )
+        frame = self._channel.seal(session, PacketType.CHUNK_DATA, payload)
 
         reader, writer = await asyncio.open_connection(
-            peer.address.ip_address, own_session.transfer_port
+            peer.address.ip_address, session.transfer_port
         )
         try:
-            writer.write(struct.pack(_LENGTH_PREFIX_FORMAT, len(envelope)) + envelope)
+            writer.write(struct.pack(_LENGTH_PREFIX_FORMAT, len(frame)) + frame)
             await writer.drain()
         finally:
             writer.close()
@@ -222,31 +209,25 @@ class TcpTransferTransport(TransferTransport):
         """Yield chunks received from `peer`, matching ``chunk_hashes``.
 
         Args:
-            peer: The peer these chunks are expected to have come
-                from — its negotiated `receive_key` is looked up from
-                the session key store to decrypt them.
+            peer: The peer these chunks are expected to have come from; frames
+                authenticated under a different peer's session are dropped.
             chunk_hashes: The hex digests of the chunks to wait for.
 
         Yields:
             Each matching :class:`Chunk`, decrypted and reconstructed,
             as it arrives.
-
-        Raises:
-            NoSessionKeyError: If no handshake has completed for `peer` yet.
         """
         remaining = set(chunk_hashes)
-        # Same fix as `send_chunk` above: the store is keyed by the
-        # peer's device_id, not our own.
-        own_session = self._session_keys.get(peer.device_id)
         while remaining:
-            envelope = await self._inbox.get()
-            encrypted = self._unpack_envelope(envelope)
-            framed = self._cipher.decrypt(
-                encrypted,
-                own_session.receive_key,
-                associated_data=self._own_device_id.encode("utf-8"),
-            )
-            packet = Packet.decode(framed)
+            frame = await self._inbox.get()
+            try:
+                packet, session = self._channel.open(frame)
+            except ReplayProtectionError as e:
+                logger.warning("inbound_frame_rejected", error=str(e))
+                continue
+            if session.peer_id != peer.device_id:
+                logger.warning("frame_from_unexpected_peer", peer=session.peer_id)
+                continue
             digest = packet.payload.get("hash_digest")
             if digest not in remaining:
                 logger.warning("unrequested_chunk_dropped", digest=digest)
@@ -257,31 +238,17 @@ class TcpTransferTransport(TransferTransport):
     async def receive_pushes(self) -> AsyncIterator[IncomingPush]:
         """See :meth:`TransferTransport.receive_pushes`.
 
-        Unlike `request_chunks`, this doesn't know in advance which
-        peer a given message came from, so it tries every currently
-        known session's `receive_key` in turn (AEAD authentication
-        naturally rejects the wrong key, so this both decrypts and
-        identifies the sender in one step) — practical for the small
-        peer counts a P2P sync tool actually has.
+        Unlike `request_chunks`, this doesn't know in advance which peer a
+        message came from. The frame's plaintext ``session_id`` resolves that in
+        O(1), so no trial decryption over candidate sessions is needed.
         """
         while True:
-            envelope = await self._inbox.get()
-            encrypted = self._unpack_envelope(envelope)
-            framed: bytes | None = None
-            for session in self._session_keys.all_sessions():
-                try:
-                    framed = self._cipher.decrypt(
-                        encrypted,
-                        session.receive_key,
-                        associated_data=self._own_device_id.encode("utf-8"),
-                    )
-                    break
-                except InvalidTag:
-                    continue
-            if framed is None:
-                logger.warning("undecryptable_push_dropped")
+            frame = await self._inbox.get()
+            try:
+                packet, session = self._channel.open(frame)
+            except ReplayProtectionError as e:
+                logger.warning("undecryptable_push_dropped", error=str(e))
                 continue
-            packet = Packet.decode(framed)
             version_counters = packet.payload.get("version_counters")
             yield IncomingPush(
                 relative_path=str(packet.payload["relative_path"]),
@@ -291,26 +258,12 @@ class TcpTransferTransport(TransferTransport):
                     VersionVector(dict(version_counters)) if version_counters is not None else None
                 ),
             )
+            logger.debug("push_received", peer=session.peer_id)
 
     @staticmethod
-    async def _read_envelope(reader: asyncio.StreamReader) -> bytes:
-        """Read one length-prefixed envelope from a stream."""
+    async def _read_frame(reader: asyncio.StreamReader) -> bytes:
+        """Read one length-prefixed frame from a stream."""
         return await read_length_prefixed(reader, max_size=MAX_MESSAGE_SIZE)
-
-    @staticmethod
-    def _pack_envelope(payload: EncryptedPayload) -> bytes:
-        """Frame an `EncryptedPayload` as `nonce + tag + ciphertext`."""
-        return payload.nonce + payload.tag + payload.ciphertext
-
-    @staticmethod
-    def _unpack_envelope(envelope: bytes) -> EncryptedPayload:
-        """Reverse :meth:`_pack_envelope`."""
-        nonce, tag, ciphertext = (
-            envelope[:NONCE_SIZE],
-            envelope[NONCE_SIZE : NONCE_SIZE + TAG_SIZE],
-            envelope[NONCE_SIZE + TAG_SIZE :],
-        )
-        return EncryptedPayload(ciphertext=ciphertext, nonce=nonce, tag=tag)
 
     @staticmethod
     def _chunk_from_payload(payload: dict[str, Any]) -> Chunk:

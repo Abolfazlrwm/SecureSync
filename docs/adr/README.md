@@ -27,6 +27,11 @@ gets a new ADR that says so and links back, rather than editing history).
 | [0020](0020-multi-peer-session-keys-and-main-py-wiring.md) | Multi-Peer Session Keys and Full `main.py` Wiring | Accepted |
 | [0021](0021-manifest-exchange-protocol.md) | A Real Manifest Exchange Protocol | Accepted |
 | [0022](0022-file-synchronization-use-case.md) | File Synchronization — Explicit Push/Pull, Not Automatic Bidirectional | Accepted |
+| [0023](0023-automatic-push-on-peer-discovery.md) | Automatic Push on Peer Discovery | Accepted |
+| [0024](0024-version-aware-sync-direction.md) | Version-Aware Sync Direction | Accepted |
+| [0025](0025-end-to-end-sync-verification.md) | End-to-End Sync Verification | Accepted |
+| [0026](0026-push-receiver.md) | Push Receiver | Accepted |
+| [0027](0027-handshake-transcript-binding-gap.md) | The Handshake Is Not Transcript-Bound — a Disclosed Gap for Item 1e | Accepted |
 
 ## Template for new ADRs
 

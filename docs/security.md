@@ -96,6 +96,27 @@ A transcript-bound signed handshake, an explicit key-confirmation message and an
 explicit rekey/teardown signal are **not implemented yet**. The handshake signs
 the salt and the sender's ephemeral public key, not the full transcript.
 
+Concretely, and as disclosed in
+[ADR-0027](adr/0027-handshake-transcript-binding-gap.md):
+
+- **`device_id`, `transfer_port` and `manifest_port` are outside the signed
+  bytes.** A captured hello can be relabelled, which pollutes the trust store
+  (the real peer's identity key gets pinned under an attacker-chosen device ID)
+  and lets the responder store attacker-chosen ports for that peer. The
+  identity key itself is bound implicitly, so this is not impersonation of the
+  peer — but it is not nothing.
+- **The responder has no explicit freshness check.** A replayed hello is
+  answered with a fresh ephemeral, so it produces a *different* `session_id`
+  and cannot resurrect the captured session — but that is a side effect of the
+  key schedule, not an enforced property. Replayed hellos still burn session
+  slots; the per-source-IP handshake rate limit and the per-peer unconfirmed
+  cap bound the damage.
+- **No key confirmation**, so a responder commits a session it never learns is
+  usable.
+
+`tests/security/test_handshake_replay.py` encodes all three, with the two
+malleability probes as strict expected failures until 1e lands.
+
 ## 4. Explicitly out of scope (for now)
 
 - Protection against a fully compromised endpoint (malware with local

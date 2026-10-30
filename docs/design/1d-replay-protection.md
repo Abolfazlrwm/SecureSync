@@ -300,3 +300,55 @@ exists.
 * regression test for the own-session/port bug: two peers with different
   device IDs each hold their own session, no lookup uses `own_device_id` where
   the peer's session is required, and messages authenticate in both directions
+
+---
+
+## 10. Post-implementation finding: the hello replay probe
+
+This section was added **after** 1d shipped, from
+`tests/security/test_handshake_replay.py`. It corrects a claim made during
+implementation and discloses two gaps that 1e must close. See
+[ADR-0027](../adr/0027-handshake-transcript-binding-gap.md).
+
+### 10.1 A correction
+
+While implementing §5 it was reported that "a replayed hello re-derives the
+same `session_id`". **That claim is wrong**, and the probe now proves it. The
+responder draws a fresh X25519 ephemeral inside `accept()` for *every*
+connection, so a replayed hello produces a different shared secret, hence a
+different `session_id`. The captured frame then names a session that no longer
+exists and is dropped with `UnknownSessionError` **before** any decryption.
+No keys come back and no frame is accepted.
+
+### 10.2 What is actually protecting us, and why that is not enough
+
+The protection above is **incidental, not designed**. It holds only because the
+key schedule happens to include a fresh responder ephemeral. There is:
+
+* no explicit freshness contribution that the responder *checks* — the
+  responder cannot distinguish a fresh hello from a six-month-old one;
+* no transcript binding — the hello signature covers `salt ‖ ephemeral_pub`
+  and nothing else, so `device_id`, `transfer_port` and `manifest_port` are
+  malleable;
+* no key confirmation — the responder commits a session it never learns is
+  usable.
+
+`test_restored_state_accepts_a_captured_frame_until_the_timestamp_ages_out`
+makes the consequence concrete: given a session with the same id and keys but
+a fresh window (i.e. state loss), a captured frame **is** accepted, and the
+timestamp skew check is the only thing left standing. Any future refactor that
+made `session_id` reproducible would silently convert this into a replay break,
+and no test in 1d would have caught it.
+
+### 10.3 Disclosed gaps
+
+| Gap | Evidence | Closed by |
+|---|---|---|
+| `device_id` is outside the signed transcript, so a captured hello can be relabelled and the responder pins the real identity key under an attacker-chosen id | `test_relabelled_device_id_is_rejected` (strict xfail) | 1e: sign a transcript hash covering every field |
+| `transfer_port` / `manifest_port` are outside the signed transcript, so a captured hello can advertise attacker-chosen ports | `test_relabelled_ports_are_rejected` (strict xfail) | 1e: same transcript hash |
+| No explicit anti-replay/freshness check on the hello, and no key confirmation | §10.2 | 1e: fresh contribution from **both** sides, transcript binding, confirmation MACs |
+
+Both xfail markers are `strict=True` with the reason attached, so the day 1e
+lands and the gaps close, these tests start passing and pytest reports them as
+**unexpected passes** — a failing build that forces the marker to be removed
+rather than letting the fix go unrecorded.

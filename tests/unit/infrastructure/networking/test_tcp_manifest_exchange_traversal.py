@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from securesync.infrastructure.networking.session_key_store import SessionKeyStore
+from securesync.infrastructure.networking.session_store import SessionStore
 from securesync.infrastructure.networking.tcp_manifest_exchange import TcpManifestExchangeTransport
 
 
@@ -29,7 +29,7 @@ def transport(sync_dir: Path):
         listen_host="127.0.0.1",
         listen_port=9999,
         cipher=MagicMock(),
-        session_keys=SessionKeyStore(),
+        sessions=SessionStore(),
         chunk_repository=chunk_repo,
         sync_root=sync_dir,
     )

@@ -1,16 +1,12 @@
 """Real X25519 key-exchange handshake over TCP, authenticated with Ed25519.
 
-This resolves the exact ambiguity flagged in
-:meth:`~securesync.infrastructure.crypto.pyca_crypto.PycaSessionKeyProvider.derive_session_keys`'s
-docstring: two peers deriving keys from the same shared secret and
-salt get an *identical* ``(key_1, key_2)`` pair — without a role
-convention, both would end up trying to encrypt with the same key.
-:class:`X25519Handshake` fixes the role deterministically: the
-initiator (the side that opened the connection) uses
-``(send=key_1, receive=key_2)``; the responder (the side that
-accepted it) uses the swapped ``(send=key_2, receive=key_1)`` — so
-the initiator's send key is always the responder's receive key, and
-vice versa.
+Two peers deriving material from the same shared secret need a role convention,
+or both would end up encrypting with the same key. The v2 key schedule
+(:mod:`securesync.infrastructure.networking.session_keys`) fixes that
+deterministically: the initiator (the side that opened the connection) sends
+with the ``i2r`` key and receives with ``r2i``; the responder does the reverse.
+Both sides also derive the same 8-byte ``session_id``, which every frame
+carries so the receiver can look a session up in O(1).
 
 Each side also signs its ephemeral public key (bound to the
 handshake's salt) with its long-term Ed25519 identity, and the
@@ -33,7 +29,7 @@ import msgpack  # type: ignore[import-untyped]
 import structlog
 
 from securesync.core.protocol import ProtocolError
-from securesync.domain.crypto import KeyExchangeProvider, SessionKeyProvider
+from securesync.domain.crypto import KeyExchangeProvider
 from securesync.domain.identity import IdentityKeyPair, IdentityProvider, TrustedPeerRepository
 from securesync.domain.identity_exceptions import (
     InvalidHandshakeSignatureError,
@@ -49,6 +45,11 @@ from securesync.infrastructure.networking.message_io import (
     MAX_HANDSHAKE_MESSAGE_SIZE,
     read_length_prefixed,
 )
+from securesync.infrastructure.networking.replay_protection import (
+    ROLE_INITIATOR,
+    ROLE_RESPONDER,
+)
+from securesync.infrastructure.networking.session_keys import derive_session_keys
 
 logger = structlog.get_logger(__name__)
 
@@ -60,6 +61,8 @@ class HandshakeResult:
 
     Attributes:
         peer_device_id: The device ID the other side identified itself as.
+        session_id: The 8-byte session identifier both sides derived.
+        role: This device's role, ``ROLE_INITIATOR`` or ``ROLE_RESPONDER``.
         send_key: Key to encrypt messages sent to this peer.
         receive_key: Key to decrypt messages received from this peer.
         peer_transfer_port: The port the peer's chunk-transfer
@@ -70,6 +73,8 @@ class HandshakeResult:
 
     __slots__ = (
         "peer_device_id",
+        "session_id",
+        "role",
         "send_key",
         "receive_key",
         "peer_transfer_port",
@@ -79,6 +84,8 @@ class HandshakeResult:
     def __init__(
         self,
         peer_device_id: str,
+        session_id: bytes,
+        role: int,
         send_key: bytes,
         receive_key: bytes,
         peer_transfer_port: int,
@@ -88,6 +95,8 @@ class HandshakeResult:
 
         Args:
             peer_device_id: The device ID the other side identified itself as.
+            session_id: The 8-byte session identifier.
+            role: This device's role in the handshake.
             send_key: Key to encrypt messages sent to this peer.
             receive_key: Key to decrypt messages received from this peer.
             peer_transfer_port: The port the peer's chunk-transfer
@@ -96,6 +105,8 @@ class HandshakeResult:
                 transport listens on.
         """
         self.peer_device_id = peer_device_id
+        self.session_id = session_id
+        self.role = role
         self.send_key = send_key
         self.receive_key = receive_key
         self.peer_transfer_port = peer_transfer_port
@@ -111,7 +122,6 @@ class X25519Handshake:
         own_transfer_port: int,
         own_manifest_port: int,
         key_exchange: KeyExchangeProvider,
-        session_keys: SessionKeyProvider,
         identity_provider: IdentityProvider,
         own_identity: IdentityKeyPair,
         trusted_peers: TrustedPeerRepository,
@@ -128,8 +138,6 @@ class X25519Handshake:
                 sent to the peer for the same reason.
             key_exchange: Generates ephemeral keypairs and derives the
                 ECDH shared secret.
-            session_keys: Derives the final `(key_1, key_2)` pair from
-                the shared secret.
             identity_provider: Signs outgoing handshake messages and
                 verifies incoming ones.
             own_identity: This device's long-term Ed25519 identity keypair.
@@ -140,7 +148,6 @@ class X25519Handshake:
         self._own_transfer_port = own_transfer_port
         self._own_manifest_port = own_manifest_port
         self._key_exchange = key_exchange
-        self._session_keys = session_keys
         self._identity_provider = identity_provider
         self._own_identity = own_identity
         self._trusted_peers = trusted_peers
@@ -190,12 +197,22 @@ class X25519Handshake:
         await self._verify_and_trust(response, salt + response["public_key"])
 
         shared_secret = self._key_exchange.derive_shared_secret(private_key, response["public_key"])
-        key_1, key_2 = self._session_keys.derive_session_keys(shared_secret, salt)
+        keys = derive_session_keys(
+            shared_secret=shared_secret,
+            salt=salt,
+            initiator_id=self._own_device_id,
+            responder_id=response["device_id"],
+            initiator_ephemeral_pub=public_key,
+            responder_ephemeral_pub=response["public_key"],
+            role=ROLE_INITIATOR,
+        )
         logger.info("handshake_completed_as_initiator", peer_device_id=response["device_id"])
         return HandshakeResult(
             peer_device_id=response["device_id"],
-            send_key=key_1,
-            receive_key=key_2,
+            session_id=keys.session_id,
+            role=ROLE_INITIATOR,
+            send_key=keys.send_key,
+            receive_key=keys.receive_key,
             peer_transfer_port=response["transfer_port"],
             peer_manifest_port=response["manifest_port"],
         )
@@ -239,14 +256,24 @@ class X25519Handshake:
         )
 
         shared_secret = self._key_exchange.derive_shared_secret(private_key, request["public_key"])
-        key_1, key_2 = self._session_keys.derive_session_keys(shared_secret, request["salt"])
+        keys = derive_session_keys(
+            shared_secret=shared_secret,
+            salt=request["salt"],
+            initiator_id=request["device_id"],
+            responder_id=self._own_device_id,
+            initiator_ephemeral_pub=request["public_key"],
+            responder_ephemeral_pub=public_key,
+            role=ROLE_RESPONDER,
+        )
         logger.info("handshake_completed_as_responder", peer_device_id=request["device_id"])
-        # Responder: swapped relative to the initiator, so each side's
-        # send_key equals the other side's receive_key.
+        # Responder: the key schedule already swaps the directional keys, so
+        # this side's send_key is the initiator's receive_key and vice versa.
         return HandshakeResult(
             peer_device_id=request["device_id"],
-            send_key=key_2,
-            receive_key=key_1,
+            session_id=keys.session_id,
+            role=ROLE_RESPONDER,
+            send_key=keys.send_key,
+            receive_key=keys.receive_key,
             peer_transfer_port=request["transfer_port"],
             peer_manifest_port=request["manifest_port"],
         )

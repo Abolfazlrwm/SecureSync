@@ -8,10 +8,10 @@ from securesync.domain.chunk import ChunkAlgorithm, ChunkCollection, ChunkHash, 
 from securesync.domain.networking import Peer, PeerAddress, PeerCapabilities, PeerIdentity
 from securesync.infrastructure.chunking.file_chunk_repository import FileChunkRepository
 from securesync.infrastructure.crypto.pyca_crypto import AesGcmCipher
-from securesync.infrastructure.networking.session_key_store import PeerSession, SessionKeyStore
 from securesync.infrastructure.networking.tcp_manifest_exchange import (
     TcpManifestExchangeTransport,
 )
+from tests.support.sessions import stores_with_pair
 
 KEY_1 = b"1" * 32
 KEY_2 = b"2" * 32
@@ -43,19 +43,21 @@ def _paired_transports(
     tmp_path: Path, port_a: int, port_b: int
 ) -> tuple[TcpManifestExchangeTransport, TcpManifestExchangeTransport, Path, Path]:
     cipher = AesGcmCipher()
-    session_keys_a, session_keys_b = SessionKeyStore(), SessionKeyStore()
-    session_keys_a.put("dev-b", PeerSession(KEY_1, KEY_2, transfer_port=0, manifest_port=port_b))
-    session_keys_b.put("dev-a", PeerSession(KEY_2, KEY_1, transfer_port=0, manifest_port=port_a))
+    # "dev-a" is the handshake initiator, so it sends with i2r and "dev-b"
+    # with r2i — the real key schedule, not a hand-written key pair.
+    store_a, store_b = stores_with_pair(
+        initiator_manifest_port=port_a, responder_manifest_port=port_b
+    )
     sync_root_a, sync_root_b = tmp_path / "root-a", tmp_path / "root-b"
     sync_root_a.mkdir()
     sync_root_b.mkdir()
     repo_a = FileChunkRepository(storage_dir=tmp_path / "manifests-a")
     repo_b = FileChunkRepository(storage_dir=tmp_path / "manifests-b")
     transport_a = TcpManifestExchangeTransport(
-        "dev-a", "127.0.0.1", port_a, cipher, session_keys_a, repo_a, sync_root_a
+        "dev-a", "127.0.0.1", port_a, cipher, store_a, repo_a, sync_root_a
     )
     transport_b = TcpManifestExchangeTransport(
-        "dev-b", "127.0.0.1", port_b, cipher, session_keys_b, repo_b, sync_root_b
+        "dev-b", "127.0.0.1", port_b, cipher, store_b, repo_b, sync_root_b
     )
     return transport_a, transport_b, sync_root_a, sync_root_b
 

@@ -29,7 +29,10 @@ from __future__ import annotations
 
 import struct
 import time
+from dataclasses import dataclass
 from typing import Final
+
+from securesync.domain.crypto import NONCE_SIZE, TAG_SIZE, EncryptedPayload
 
 # --- Frame / direction constants ------------------------------------------------
 
@@ -82,6 +85,26 @@ class TimestampSkewError(ReplayProtectionError):
     """The packet timestamp was outside the allowed skew window."""
 
 
+class UnsupportedVersionError(ReplayProtectionError):
+    """The frame carried a wire-protocol version this build does not speak.
+
+    Raised from the *plaintext* version byte, before any decryption, so a v1
+    peer gets a clean, explicit error instead of an authentication failure.
+    """
+
+
+class AuthenticationError(ReplayProtectionError):
+    """The AEAD tag did not verify (wrong key, tampered ciphertext or AAD)."""
+
+
+class ReplayWindowRejectedError(ReplayProtectionError):
+    """The frame's counter was rejected by the anti-replay window."""
+
+
+class UnknownSessionError(ReplayProtectionError):
+    """No session exists for the frame's ``session_id``."""
+
+
 # --- Frame header pack / unpack ------------------------------------------------
 
 
@@ -124,6 +147,97 @@ def unpack_frame_header(data: bytes) -> tuple[int, int, int, bytes]:
         )
     version, direction, packet_type, session_id = struct.unpack(">BBB8s", data[:FRAME_HEADER_SIZE])
     return version, direction, packet_type, session_id
+
+
+# --- Complete frame encode / split --------------------------------------------
+
+#: Minimum on-wire frame: header + nonce + tag (empty ciphertext).
+MIN_FRAME_SIZE: Final = FRAME_HEADER_SIZE + NONCE_SIZE + TAG_SIZE
+
+
+@dataclass(frozen=True, slots=True)
+class FrameHeader:
+    """The plaintext header of one wire frame.
+
+    Attributes:
+        version: Wire-frame version.
+        direction: One of the ``DIRECTION_*`` constants.
+        packet_type: The :class:`~securesync.core.protocol.PacketType` value.
+        session_id: The 8-byte session identifier.
+    """
+
+    version: int
+    direction: int
+    packet_type: int
+    session_id: bytes
+
+
+def encode_frame(
+    *,
+    direction: int,
+    packet_type: int,
+    session_id: bytes,
+    nonce: bytes,
+    ciphertext: bytes,
+    tag: bytes,
+    version: int = FRAME_VERSION,
+) -> bytes:
+    """Serialize a complete frame: header ‖ nonce ‖ ciphertext ‖ tag.
+
+    Args:
+        direction: One of the ``DIRECTION_*`` constants.
+        packet_type: The packet type, also present in the AAD.
+        session_id: Exactly :data:`SESSION_ID_SIZE` bytes.
+        nonce: Exactly :data:`~securesync.domain.crypto.NONCE_SIZE` bytes.
+        ciphertext: The AEAD ciphertext.
+        tag: Exactly :data:`~securesync.domain.crypto.TAG_SIZE` bytes.
+        version: Wire-frame version (defaults to :data:`FRAME_VERSION`).
+
+    Returns:
+        The complete frame bytes.
+
+    Raises:
+        FrameDecodeError: If any fixed-width field has the wrong length.
+    """
+    if len(nonce) != NONCE_SIZE:
+        raise FrameDecodeError(f"nonce must be {NONCE_SIZE} bytes, got {len(nonce)}")
+    if len(tag) != TAG_SIZE:
+        raise FrameDecodeError(f"tag must be {TAG_SIZE} bytes, got {len(tag)}")
+    return pack_frame_header(version, direction, packet_type, session_id) + nonce + ciphertext + tag
+
+
+def split_frame(
+    data: bytes,
+) -> tuple[FrameHeader, bytes, EncryptedPayload]:
+    """Parse a complete frame into its header, nonce and encrypted payload.
+
+    Args:
+        data: The frame bytes, as produced by :func:`encode_frame`.
+
+    Returns:
+        ``(header, nonce, payload)``.
+
+    Raises:
+        FrameDecodeError: If the frame is too short for its fixed-width fields.
+    """
+    if len(data) < MIN_FRAME_SIZE:
+        raise FrameDecodeError(f"frame must be >= {MIN_FRAME_SIZE} bytes, got {len(data)}")
+    version, direction, packet_type, session_id = unpack_frame_header(data)
+    offset = FRAME_HEADER_SIZE
+    nonce = data[offset : offset + NONCE_SIZE]
+    offset += NONCE_SIZE
+    ciphertext = data[offset : len(data) - TAG_SIZE]
+    tag = data[len(data) - TAG_SIZE :]
+    return (
+        FrameHeader(
+            version=version,
+            direction=direction,
+            packet_type=packet_type,
+            session_id=session_id,
+        ),
+        nonce,
+        EncryptedPayload(ciphertext=ciphertext, nonce=nonce, tag=tag),
+    )
 
 
 # --- Direction helpers ---------------------------------------------------------

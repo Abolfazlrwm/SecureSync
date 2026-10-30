@@ -31,10 +31,7 @@ from unittest.mock import patch
 import yaml
 
 from securesync.infrastructure.crypto.ed25519_identity_provider import Ed25519IdentityProvider
-from securesync.infrastructure.crypto.pyca_crypto import (
-    PycaKeyExchangeProvider,
-    PycaSessionKeyProvider,
-)
+from securesync.infrastructure.crypto.pyca_crypto import PycaKeyExchangeProvider
 from securesync.infrastructure.networking.file_trusted_peer_repository import (
     FileTrustedPeerRepository,
 )
@@ -169,7 +166,6 @@ class TestBootstrapWiring:
             0,
             0,
             PycaKeyExchangeProvider(),
-            PycaSessionKeyProvider(),
             peer_identity_provider,
             peer_identity,
             FileTrustedPeerRepository(peer_storage / "trusted_peers.json"),

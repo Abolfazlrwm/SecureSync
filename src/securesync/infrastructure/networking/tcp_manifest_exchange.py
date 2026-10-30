@@ -6,7 +6,7 @@ a true request/response exchange over one connection: the requester
 sends an encrypted request and waits on the same connection for an
 encrypted response, since a manifest lookup needs an answer, not just
 delivery. Reuses the already-negotiated
-:class:`~securesync.infrastructure.networking.session_key_store.PeerSession`
+:class:`~securesync.infrastructure.networking.session_store.PeerSession`
 keys from the same handshake `TcpTransferTransport` uses — no separate
 key exchange for this port.
 
@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import os
 import struct
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -32,11 +31,11 @@ from typing import Any, Protocol
 import msgpack  # type: ignore[import-untyped]
 import structlog
 
-from securesync.core.protocol import Packet, PacketType, ProtocolError, make_header
+from securesync.core.protocol import PacketType, ProtocolError
 from securesync.domain.chunk import Chunk, ChunkAlgorithm, ChunkHash, ChunkMetadata
 from securesync.domain.chunking import ChunkRepository
 from securesync.domain.conflict import VersionVector
-from securesync.domain.crypto import NONCE_SIZE, TAG_SIZE, AeadCipher, EncryptedPayload
+from securesync.domain.crypto import AeadCipher
 from securesync.domain.manifest_exchange import (
     ManifestExchangeTransport,
     ManifestWithVersion,
@@ -52,7 +51,9 @@ from securesync.infrastructure.networking.message_io import (
     MAX_MESSAGE_SIZE,
     read_length_prefixed,
 )
-from securesync.infrastructure.networking.session_key_store import SessionKeyStore
+from securesync.infrastructure.networking.replay_protection import ReplayProtectionError
+from securesync.infrastructure.networking.secure_channel import SecureChannel
+from securesync.infrastructure.networking.session_store import NoSessionError, SessionStore
 from securesync.shared.safe_path import UnsafePathError, resolve_within
 
 logger = structlog.get_logger(__name__)
@@ -81,7 +82,7 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
         listen_host: str,
         listen_port: int,
         cipher: AeadCipher,
-        session_keys: SessionKeyStore,
+        sessions: SessionStore,
         chunk_repository: ChunkRepository,
         sync_root: Path,
         metadata_lookup: _MetadataLookup | None = None,
@@ -93,7 +94,7 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
             listen_host: Host/interface to accept inbound requests on.
             listen_port: Port to accept inbound requests on.
             cipher: The AEAD cipher used to encrypt and decrypt every message.
-            session_keys: Per-peer session keys, shared with whatever
+            sessions: Negotiated sessions, shared with whatever
                 `TcpTransferTransport` negotiated them.
             chunk_repository: Local store manifests are served from
                 when a peer requests one — the same port
@@ -120,18 +121,13 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
         self._listen_host = listen_host
         self._listen_port = listen_port
         self._cipher = cipher
-        self._session_keys = session_keys
+        self._sessions = sessions
+        self._channel = SecureChannel(own_device_id, cipher, sessions)
         self._chunk_repository = chunk_repository
         self._sync_root = sync_root
         self._metadata_lookup = metadata_lookup
-        self._message_id = 0
         self._active_connections = 0
         self._server: asyncio.Server | None = None
-
-    def _next_message_id(self) -> int:
-        """Return a monotonically increasing ID for request/response correlation."""
-        self._message_id += 1
-        return self._message_id
 
     async def start(self) -> None:
         """Start accepting inbound manifest requests.
@@ -168,36 +164,30 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
             the peer doesn't have that file.
 
         Raises:
+            NoSessionError: If the peer has no confirmed session.
             OSError: If `peer` can't be reached.
         """
-        session = self._session_keys.get(peer.device_id)
-        header = make_header(PacketType.FILE_MANIFEST, message_id=self._next_message_id())
-        framed = Packet(header=header, payload={"relative_path": relative_path}).encode()
-        nonce = os.urandom(NONCE_SIZE)
-        encrypted = self._cipher.encrypt(
-            framed, session.send_key, nonce, associated_data=peer.device_id.encode("utf-8")
+        session = self._sessions.get_send_session(peer.device_id)
+        if session is None:
+            raise NoSessionError(
+                f"no confirmed session for {peer.device_id!r} — a handshake must complete first"
+            )
+        frame = self._channel.seal(
+            session, PacketType.FILE_MANIFEST, {"relative_path": relative_path}
         )
 
         reader, writer = await asyncio.open_connection(
             peer.address.ip_address, session.manifest_port
         )
         try:
-            envelope = self._pack_envelope(encrypted)
-            await self._write_message(
-                writer, {"device_id": self._own_device_id, "envelope": envelope}
-            )
+            await self._write_message(writer, {"envelope": frame})
             response = await self._read_message(reader)
         finally:
             writer.close()
             with contextlib.suppress(ConnectionError):
                 await writer.wait_closed()
 
-        response_encrypted = self._unpack_envelope(response["envelope"])
-        associated_data = self._own_device_id.encode("utf-8")
-        response_framed = self._cipher.decrypt(
-            response_encrypted, session.receive_key, associated_data=associated_data
-        )
-        response_packet = Packet.decode(response_framed)
+        response_packet, _ = self._channel.open(response["envelope"])
         if not response_packet.payload["found"]:
             return None
 
@@ -221,37 +211,29 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
             Each requested chunk the peer actually has, with real data.
 
         Raises:
+            NoSessionError: If the peer has no confirmed session.
             OSError: If `peer` can't be reached.
         """
-        session = self._session_keys.get(peer.device_id)
-        header = make_header(PacketType.CHUNK_REQUEST, message_id=self._next_message_id())
+        session = self._sessions.get_send_session(peer.device_id)
+        if session is None:
+            raise NoSessionError(
+                f"no confirmed session for {peer.device_id!r} — a handshake must complete first"
+            )
         payload = {"relative_path": relative_path, "chunk_hashes": chunk_hashes}
-        framed = Packet(header=header, payload=payload).encode()
-        nonce = os.urandom(NONCE_SIZE)
-        encrypted = self._cipher.encrypt(
-            framed, session.send_key, nonce, associated_data=peer.device_id.encode("utf-8")
-        )
+        frame = self._channel.seal(session, PacketType.CHUNK_REQUEST, payload)
 
         reader, writer = await asyncio.open_connection(
             peer.address.ip_address, session.manifest_port
         )
         try:
-            envelope = self._pack_envelope(encrypted)
-            await self._write_message(
-                writer, {"device_id": self._own_device_id, "envelope": envelope}
-            )
+            await self._write_message(writer, {"envelope": frame})
             response = await self._read_message(reader)
         finally:
             writer.close()
             with contextlib.suppress(ConnectionError):
                 await writer.wait_closed()
 
-        response_encrypted = self._unpack_envelope(response["envelope"])
-        associated_data = self._own_device_id.encode("utf-8")
-        response_framed = self._cipher.decrypt(
-            response_encrypted, session.receive_key, associated_data=associated_data
-        )
-        response_packet = Packet.decode(response_framed)
+        response_packet, _ = self._channel.open(response["envelope"])
         for chunk_payload in response_packet.payload["chunks"]:
             yield self._chunk_from_payload(chunk_payload)
 
@@ -269,14 +251,9 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
         self._active_connections += 1
         try:
             request = await self._read_message(reader)
-            session = self._session_keys.get(request["device_id"])
-            request_encrypted = self._unpack_envelope(request["envelope"])
-            request_framed = self._cipher.decrypt(
-                request_encrypted,
-                session.receive_key,
-                associated_data=self._own_device_id.encode("utf-8"),
-            )
-            request_packet = Packet.decode(request_framed)
+            # The session comes from the frame's authenticated session_id, not
+            # from any device_id the requester claims.
+            request_packet, session = self._channel.open(request["envelope"])
 
             if request_packet.header.packet_type == PacketType.CHUNK_REQUEST:
                 response_payload = self._build_chunk_response(request_packet.payload)
@@ -285,22 +262,14 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
                 response_payload = await self._build_manifest_response(request_packet.payload)
                 response_type = PacketType.FILE_MANIFEST
 
-            response_header = make_header(response_type, message_id=self._next_message_id())
-            response_framed = Packet(header=response_header, payload=response_payload).encode()
-            nonce = os.urandom(NONCE_SIZE)
-            response_encrypted = self._cipher.encrypt(
-                response_framed,
-                session.send_key,
-                nonce,
-                associated_data=request["device_id"].encode("utf-8"),
-            )
-            envelope = self._pack_envelope(response_encrypted)
-            await self._write_message(writer, {"envelope": envelope})
+            response_frame = self._channel.seal(session, response_type, response_payload)
+            await self._write_message(writer, {"envelope": response_frame})
         except (
             asyncio.IncompleteReadError,
             ConnectionError,
             KeyError,
             ProtocolError,
+            ReplayProtectionError,
         ) as e:
             logger.warning("manifest_exchange_request_failed", error=str(e))
         except UnsafePathError as e:
@@ -402,11 +371,6 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
         result: dict[str, Any] = msgpack.unpackb(data, raw=False)
         return result
 
-    @staticmethod
-    def _pack_envelope(payload: EncryptedPayload) -> bytes:
-        """Frame an `EncryptedPayload` as `nonce + tag + ciphertext`."""
-        return payload.nonce + payload.tag + payload.ciphertext
-
     def _safe_resolve(self, relative_path: str) -> Path:
         """Resolve a peer-supplied relative path against the sync root.
 
@@ -421,13 +385,3 @@ class TcpManifestExchangeTransport(ManifestExchangeTransport):
             UnsafePathError: If the path would resolve outside the sync root.
         """
         return resolve_within(self._sync_root, relative_path)
-
-    @staticmethod
-    def _unpack_envelope(envelope: bytes) -> EncryptedPayload:
-        """Reverse :meth:`_pack_envelope`."""
-        nonce, tag, ciphertext = (
-            envelope[:NONCE_SIZE],
-            envelope[NONCE_SIZE : NONCE_SIZE + TAG_SIZE],
-            envelope[NONCE_SIZE + TAG_SIZE :],
-        )
-        return EncryptedPayload(ciphertext=ciphertext, nonce=nonce, tag=tag)

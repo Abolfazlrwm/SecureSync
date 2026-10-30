@@ -36,7 +36,6 @@ from securesync.infrastructure.crypto.ed25519_identity_provider import Ed25519Id
 from securesync.infrastructure.crypto.pyca_crypto import (
     AesGcmCipher,
     PycaKeyExchangeProvider,
-    PycaSessionKeyProvider,
 )
 from securesync.infrastructure.metadata.sqlite_metadata_repository import SqliteMetadataRepository
 from securesync.infrastructure.networking.file_trusted_peer_repository import (
@@ -47,7 +46,7 @@ from securesync.infrastructure.networking.in_memory_conflict_repository import (
 )
 from securesync.infrastructure.networking.in_memory_peer_repository import InMemoryPeerRepository
 from securesync.infrastructure.networking.mdns_discovery import MdnsDiscoveryService
-from securesync.infrastructure.networking.session_key_store import PeerSession, SessionKeyStore
+from securesync.infrastructure.networking.session_store import PeerSession, SessionStore
 from securesync.infrastructure.networking.tcp_manifest_exchange import (
     TcpManifestExchangeTransport,
 )
@@ -64,7 +63,7 @@ _LISTEN_HOST = "0.0.0.0"  # noqa: S104 — SecureSync is meant to accept LAN pee
 
 
 async def _drain_inbound_handshakes(
-    handshake_server: HandshakeServer, session_keys: SessionKeyStore
+    handshake_server: HandshakeServer, sessions: SessionStore
 ) -> None:
     """Feed completed inbound (responder-side) handshakes into the shared session store.
 
@@ -72,17 +71,26 @@ async def _drain_inbound_handshakes(
     *this* device initiates — this loop is the equivalent for
     handshakes other peers initiate against this device's
     `HandshakeServer`.
+
+    A responder-side session is recorded **unconfirmed**: it becomes usable
+    once the first inbound frame authenticates under it, which proves the peer
+    actually holds the derived keys. Recording it (rather than replacing any
+    existing session) is what lets a restarted peer reconnect without evicting
+    a healthy session.
     """
     while True:
         result = await handshake_server.results.get()
-        session_keys.put(
-            result.peer_device_id,
+        sessions.put(
             PeerSession(
+                peer_id=result.peer_device_id,
+                session_id=result.session_id,
+                role=result.role,
                 send_key=result.send_key,
                 receive_key=result.receive_key,
                 transfer_port=result.peer_transfer_port,
                 manifest_port=result.peer_manifest_port,
-            ),
+                confirmed=False,
+            )
         )
 
 
@@ -136,28 +144,26 @@ async def bootstrap(
 
     # 3. Wire the real, authenticated, multi-peer transfer path.
     key_exchange = PycaKeyExchangeProvider()
-    session_key_provider = PycaSessionKeyProvider()
     trusted_peers = FileTrustedPeerRepository(storage_dir / "trusted_peers.json")
-    session_keys = SessionKeyStore()
+    sessions = SessionStore()
 
     handshake = X25519Handshake(
         device_id,
         config.network.transfer_port,
         config.network.manifest_port,
         key_exchange,
-        session_key_provider,
         identity_provider,
         own_identity,
         trusted_peers,
     )
     handshake_server = HandshakeServer(handshake)
     await handshake_server.start(_LISTEN_HOST, config.network.port)
-    drain_task = asyncio.create_task(_drain_inbound_handshakes(handshake_server, session_keys))
+    drain_task = asyncio.create_task(_drain_inbound_handshakes(handshake_server, sessions))
 
-    session_coordinator = X25519SessionCoordinator(handshake, session_keys)
+    session_coordinator = X25519SessionCoordinator(handshake, sessions)
     cipher = AesGcmCipher()
     transport = TcpTransferTransport(
-        device_id, _LISTEN_HOST, config.network.transfer_port, cipher, session_keys
+        device_id, _LISTEN_HOST, config.network.transfer_port, cipher, sessions
     )
     await transport.start()
     download_use_case = DownloadChunksUseCase(transport)
@@ -188,7 +194,7 @@ async def bootstrap(
         _LISTEN_HOST,
         config.network.manifest_port,
         cipher,
-        session_keys,
+        sessions,
         chunk_repository,
         Path(config.storage.sync_directory),
         metadata_lookup=metadata_repo,

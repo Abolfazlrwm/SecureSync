@@ -17,7 +17,10 @@ import msgpack  # type: ignore[import-untyped]
 
 MAGIC: Final = 0x53594E43  # "SYNC"
 HEADER_SIZE: Final = 32
-CURRENT_VERSION: Final = 1
+#: Wire-protocol version. Bumped 1 -> 2 in Step 1d for the replay-protection
+#: frame (plaintext session_id, deterministic nonce, AAD-bound metadata).
+#: v1 and v2 peers cannot interoperate; see docs/protocol.md.
+CURRENT_VERSION: Final = 2
 
 
 @unique

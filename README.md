@@ -6,12 +6,11 @@
 **Encrypted peer-to-peer file synchronization engine.**
 
 [![CI](https://github.com/Abolfazlrwm/SecureSync/actions/workflows/ci.yml/badge.svg)](https://github.com/Abolfazlrwm/SecureSync/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/Abolfazlrwm/SecureSync/branch/main/graph/badge.svg)](https://codecov.io/gh/Abolfazlrwm/SecureSync)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)]()
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-inspired-4baaaa.svg)](CODE_OF_CONDUCT.md)
-[![Tests](https://img.shields.io/badge/tests-413%20passing-brightgreen)]()
-[![Coverage](https://img.shields.io/badge/coverage-93%25-brightgreen)]()
 [![Status](https://img.shields.io/badge/status-Phase_21_%E2%80%94_push_receiver-green)]()
 
 </div>
@@ -58,7 +57,8 @@ central server holds your data.
 This isn't a toy that only passes its own tests — it's been pressure-tested
 against reality at every layer:
 
-- **413 tests, 93% coverage**, including a real end-to-end test
+- **576 tests, 94% line coverage** (measured in CI and published to Codecov),
+  including a real end-to-end test
   ([tests/integration/test_end_to_end_sync.py](tests/integration/test_end_to_end_sync.py))
   that runs two independent instances over real TCP with real crypto and
   confirms a file actually reconstructs correctly on the other side.

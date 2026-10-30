@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install ".[dev]"
+      - run: pip install -e ".[dev]"
       - run: ruff check src tests
 
   format:
@@ -30,7 +30,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install ".[dev]"
+      - run: pip install -e ".[dev]"
       - run: black --check src tests
 
   typecheck:
@@ -41,7 +41,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install ".[dev]"
+      - run: pip install -e ".[dev]"
       - run: mypy src
 
   test:
@@ -57,7 +57,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install ".[dev]"
+      - run: pip install -e ".[dev]"
       - name: Run tests
         # GitHub's Windows runners default `run:` steps to PowerShell,
         # not bash -- this script's `if [ "$code" -eq 5 ]` syntax is
@@ -78,6 +78,29 @@ jobs:
             exit 0
           fi
           exit $code
+      # Guard against the report silently measuring nothing. This job used to
+      # print "TOTAL 1917 1917 0%" and upload a 0% coverage.xml to Codecov,
+      # because `pip install .` (non-editable) put a second copy of the
+      # package in site-packages that the tests actually imported, while
+      # coverage measured src/securesync. That is fixed by the editable
+      # install above plus `pythonpath = ["src", "."]`, and this step makes
+      # any regression fail loudly instead of shipping a green 0%.
+      - name: Assert coverage was actually measured
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        run: |
+          python - <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse("coverage.xml").getroot()
+          rate = float(root.get("line-rate", "0"))
+          print(f"coverage line-rate = {rate:.4f}")
+          if rate <= 0.0:
+              sys.exit(
+                  "coverage.xml reports 0% — the tests are not importing the "
+                  "checked-out source, so the uploaded report is meaningless"
+              )
+          PY
       - uses: codecov/codecov-action@v4
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         with:
@@ -92,7 +115,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install ".[dev]"
+      - run: pip install -e ".[dev]"
       # No exit-code-5 escape hatch here, deliberately.
       #
       # pytest exits 5 when it collects no tests. This job previously

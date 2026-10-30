@@ -94,9 +94,37 @@ disallow_untyped_defs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+# `src` makes the tests import the *checked-out* package rather than whatever
+# copy `pip install` put in site-packages. Without it, a non-editable install
+# shadows the repo source and coverage measures files that never execute —
+# which is exactly why CI used to report "TOTAL ... 0%".
+pythonpath = ["src", "."]
 asyncio_mode = "auto"
 # --cov and --cov-report=term-missing apply to every `pytest` invocation.
-# Makefile/CI only ever *add* an extra --cov-report (html, xml) on top of
-# this — never repeat --cov=src/securesync or term-missing elsewhere.
-addopts = "--cov=src/securesync --cov-report=term-missing"
+# `--cov=.` (not `--cov=src/securesync`) so the XML keeps repo-relative paths;
+# the `omit` list under [tool.coverage.run] keeps the measured set to the
+# package. Makefile/CI only ever *add* an extra --cov-report (html, xml) on
+# top of this — never repeat --cov or term-missing elsewhere.
+addopts = "--cov=. --cov-report=term-missing"
+
+[tool.coverage.run]
+# Measure from the repository root so coverage.xml lists repo-relative paths
+# (`src/securesync/main.py`). With `--cov=src/securesync` the package
+# directory becomes the report root and the XML lists `main.py`, which
+# Codecov cannot map back to this repository.
+source = ["."]
+omit = [
+    "tests/*",
+    "benchmarks/*",
+    "scripts/*",
+    "examples/*",
+    ".venv/*",
+]
+relative_files = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

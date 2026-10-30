@@ -78,6 +78,19 @@ class TestKeyingAndLookup:
         assert len(store) == 1
         assert store.get_by_session_id(_sid(1)).confirmed is True  # type: ignore[union-attr]
 
+    def test_unconfirmed_put_cannot_downgrade_a_confirmed_session(self) -> None:
+        store = _store()
+        store.put(_session("p", _sid(1), confirmed=True))
+        store.get_by_session_id(_sid(1)).receive_window.accept(7)  # type: ignore[union-attr]
+
+        # A replayed hello re-derives the same session_id as unconfirmed.
+        store.put(_session("p", _sid(1), confirmed=False))
+
+        live = store.get_by_session_id(_sid(1))
+        assert live is not None
+        assert live.confirmed is True
+        assert live.receive_window.highest_accepted == 7
+
 
 class TestSendSessionSelection:
     def test_unconfirmed_session_is_not_usable_for_sending(self) -> None:

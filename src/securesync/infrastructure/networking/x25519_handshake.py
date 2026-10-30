@@ -39,6 +39,10 @@ from securesync.domain.identity_exceptions import (
     InvalidHandshakeSignatureError,
     PeerIdentityMismatchError,
 )
+from securesync.infrastructure.networking.handshake_rate_limit import (
+    UNKNOWN_SOURCE,
+    SourceIpRateLimiter,
+)
 from securesync.infrastructure.networking.message_io import (
     _LENGTH_PREFIX_FORMAT,
     MAX_CONCURRENT_CONNECTIONS,
@@ -303,13 +307,22 @@ class HandshakeServer:
     :class:`~securesync.infrastructure.networking.tcp_transport.TcpTransferTransport`.
     """
 
-    def __init__(self, handshake: X25519Handshake) -> None:
+    def __init__(
+        self,
+        handshake: X25519Handshake,
+        rate_limiter: SourceIpRateLimiter | None = None,
+    ) -> None:
         """Initialize the server.
 
         Args:
             handshake: Performs the responder side of each inbound handshake.
+            rate_limiter: Per-source-IP limiter applied **before** the
+                handshake's X25519/Ed25519 work. Defaults to a limiter with
+                :data:`~securesync.infrastructure.networking.handshake_rate_limit.MAX_HANDSHAKES_PER_IP`
+                attempts per window.
         """
         self._handshake = handshake
+        self._rate_limiter = rate_limiter if rate_limiter is not None else SourceIpRateLimiter()
         self._server: asyncio.Server | None = None
         self._active_connections = 0
         self.results: asyncio.Queue[HandshakeResult] = asyncio.Queue()
@@ -336,6 +349,18 @@ class HandshakeServer:
     async def _handle_connection(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
+        source_ip = self._source_ip(writer)
+        # Rate-limit before anything expensive: `accept` below performs an
+        # X25519 keypair generation, an ECDH, an Ed25519 verification and a
+        # trust-store read, all of it on behalf of a peer that has not
+        # authenticated yet.
+        if not self._rate_limiter.allow(source_ip):
+            logger.warning("handshake_rate_limited", source_ip=source_ip)
+            writer.close()
+            with contextlib.suppress(ConnectionError):
+                await writer.wait_closed()
+            return
+
         if self._active_connections >= MAX_CONCURRENT_CONNECTIONS:
             logger.warning("handshake_refused_too_many", active=self._active_connections)
             writer.close()
@@ -361,3 +386,22 @@ class HandshakeServer:
             writer.close()
             with contextlib.suppress(ConnectionError):
                 await writer.wait_closed()
+
+    @staticmethod
+    def _source_ip(writer: asyncio.StreamWriter) -> str:
+        """Return the connecting peer's IP address, or :data:`UNKNOWN_SOURCE`.
+
+        The address comes from the socket, never from the handshake message:
+        the ``device_id`` inside a hello is unauthenticated until its signature
+        verifies, so using it for rate limiting would let an attacker rotate IDs
+        to escape the limit.
+        """
+        get_extra_info = getattr(writer, "get_extra_info", None)
+        if get_extra_info is None:  # pragma: no cover - test doubles
+            return UNKNOWN_SOURCE
+        peername: object = get_extra_info("peername")
+        if isinstance(peername, tuple) and peername:
+            host = peername[0]
+            if isinstance(host, str):
+                return host
+        return UNKNOWN_SOURCE

@@ -205,6 +205,14 @@ class SessionStore:
                 f"session_id must be {SESSION_ID_SIZE} bytes, got {len(session.session_id)}"
             )
         if session.session_id in self._by_session_id:
+            existing = self._by_session_id[session.session_id]
+            if existing.confirmed:
+                # A *replayed* hello re-derives exactly the same session_id
+                # (same ephemeral keys, same salt). Replacing the confirmed
+                # session would reset its anti-replay window and its send
+                # counter, which is precisely what an attacker replaying a
+                # captured hello would want. Keep the live session untouched.
+                return
             self._by_session_id[session.session_id] = session
             self._index_peer(session.peer_id, session.session_id)
             return

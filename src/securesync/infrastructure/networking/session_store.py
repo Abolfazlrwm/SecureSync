@@ -70,6 +70,10 @@ class CounterExhaustedError(SessionStoreError):
     """
 
 
+class NoSessionError(SessionStoreError):
+    """No usable session exists for a peer, so a new handshake is required."""
+
+
 @dataclass(slots=True)
 class PeerSession:
     """One negotiated session with one peer.

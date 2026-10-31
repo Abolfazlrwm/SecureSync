@@ -106,3 +106,39 @@ The first two bytes of each payload are the 2-byte big-endian length of the
 label (`0x001b` = 27), followed by the ASCII label, followed by the
 transcript. A responder signature therefore cannot be replayed as an
 initiator signature even if the transcript bytes were identical.
+
+## Key schedule
+
+Derived from the fixed inputs above plus `ss = X25519(E_I_SEED, E_R_PUB)`. The
+KAT in
+[`tests/unit/infrastructure/networking/test_handshake_keys.py`](../../tests/unit/infrastructure/networking/test_handshake_keys.py)
+asserts these exact bytes.
+
+```text
+ss         = 9663aa1da97e848a914a436d04163dfbb89178f107f1b5b77ed3854203382854
+master     = d65e14df0d271da9bb5d7d315e5477eecffde2f10c96689a356ccab83083d7ab
+k_r        = 4555af6e0feb941795f8e15993036f1ad886ff56f9ab920a89c8489f2444f585
+k_i        = a2f09dd855c1d25d68c46e59cecabad9ed8a3df77942eef872174e3e8c6630dd
+session_id = 37575568cab8950b
+i2r_key    = d653f50cde85223116dc0b756ac3dcf7ddcee40eccb000a98b78c4104967bc51
+r2i_key    = daf67e5dc9dc5594f41ec1da412d293cc17830eb5d72a7b0adf51dc18f1ee5d4
+```
+
+Note `k_r != k_i`: the two confirmation keys are independent, so `mac_r` cannot
+be reflected back as `mac_i`.
+
+## SAS
+
+Derived from the frozen `t_final` above, so the same handshake that produces the
+transcripts also produces this pairing code.
+
+```text
+sas_material = H(T1 ‖ b"-sas" ‖ t_final)
+             = 9c25e36663b3addadb74e10491aeea0ef475fa310903ffbe3b6e0c0e2d8b6f92
+words (4)    = order-congress-sunset-shuffle     (44 bits)
+digits (8)   = 10984850                          (26.6 bits)
+```
+
+`words` is the default rendering; `digits` is the explicit alternative. Both are
+read from the same material, so a user comparing either one compares the same
+handshake.

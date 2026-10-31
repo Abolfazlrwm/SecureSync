@@ -67,7 +67,7 @@ against reality at every layer:
   platform-specific bugs (a Windows-only `asyncio` signal-handling crash, a
   macOS-only test race, a Windows-only timer-precision flake) that a
   single-platform setup would never have surfaced.
-- **26 Architecture Decision Records** ([docs/adr/](docs/adr/)) — a real,
+- **27 Architecture Decision Records** ([docs/adr/](docs/adr/)) — a real,
   unfiltered account of every non-trivial design decision *and* every real
   bug found along the way (including bugs the end-to-end test caught that
   413 passing unit tests had missed entirely, because they only existed at
@@ -197,9 +197,10 @@ A real answer, not a marketing one:
 - **No compression, resumable transfers, or bandwidth/rate limiting yet.**
   These are real, scoped items in [ROADMAP.md](ROADMAP.md)'s Advanced
   Features list, not silently dropped.
-- **The cryptographic protocol composition is not independently audited**
-  (see the FAQ below) — the primitives are, the specific way they're
-  combined here isn't.
+- **The handshake is a custom, unaudited protocol.** It is a SIGMA-style
+  construction on top of audited primitives — not TLS, not Noise. The
+  primitives are audited; the composition and the handshake itself are not
+  (see the FAQ below and [docs/security.md](docs/security.md)).
 - **Single-writer conflict resolution only** (Last-Writer-Wins by default).
   True CRDT-style automatic merging for concurrent edits to the same file
   isn't implemented.
@@ -218,9 +219,11 @@ deliberately doesn't try to do yet.
 **Is the cryptography audited?**
 SecureSync only uses well-established primitives from the audited `cryptography`
 (pyca) library — X25519 for key exchange, Ed25519 for identity, AES-256-GCM
-/ ChaCha20-Poly1305 for AEAD. The *composition* of those primitives into a
-protocol is not independently audited. See
-[docs/security.md](docs/security.md) for the full threat model.
+/ ChaCha20-Poly1305 for AEAD. The handshake, however, is a **custom,
+unaudited protocol**: a SIGMA-style construction (not TLS, not Noise). The
+primitives are audited; the composition and the handshake are not. See
+[docs/security.md](docs/security.md) for the full threat model and
+[docs/design/1e-handshake.md](docs/design/1e-handshake.md) for the design.
 
 **Why does the README mention bugs you found in your own code?**
 Because they're real, and hiding them wouldn't make the code better — see

@@ -16,6 +16,14 @@ OpenSSL/BoringSSL. SecureSync's own code is only responsible for *composing*
 these primitives correctly (key exchange → key derivation → AEAD encryption
 → nonce management) — never for implementing them.
 
+This principle covers **primitives, not protocol composition**. The handshake —
+the current v2 hello/reply and the planned v3 SIGMA-style design
+([`docs/design/1e-handshake.md`](design/1e-handshake.md)) — is a **custom,
+unaudited protocol**. It composes audited primitives, but the composition itself
+has not been independently reviewed. TLS 1.3 with pinned self-signed
+certificates was considered and rejected for this project; the reasoning is in
+the design doc, §8.
+
 ## 2. Cryptographic building blocks
 
 | Purpose | Primitive | Notes |

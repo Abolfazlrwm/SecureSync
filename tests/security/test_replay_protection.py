@@ -46,6 +46,7 @@ from securesync.infrastructure.networking.secure_channel import SecureChannel
 from securesync.infrastructure.networking.session_store import (
     MAX_UNCONFIRMED_PER_PEER,
     PeerSession,
+    SessionIdCollisionError,
     SessionStore,
 )
 from securesync.infrastructure.networking.tcp_transport import TcpTransferTransport
@@ -346,10 +347,12 @@ class TestSessionLifecycle:
         assert peers.session_b.receive_window.highest_accepted == 1
 
         # Replay of the identical hello: same salt and ephemerals, so the same
-        # session_id, recorded again as an unconfirmed session.
+        # session_id, recorded again as an unconfirmed session. The store must
+        # refuse the collision rather than replace the live session.
         replay_a, replay_b = paired_sessions()
         replay_b.confirmed = False
-        peers.store_b.put(replay_b)
+        with pytest.raises(SessionIdCollisionError):
+            peers.store_b.put(replay_b)
 
         live = peers.store_b.get_by_session_id(peers.session_b.session_id)
         assert live is not None

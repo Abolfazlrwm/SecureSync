@@ -1,14 +1,21 @@
 # 1e — Handshake redesign: transcript binding, freshness and key confirmation
 
-Status: **design only, no code**. This document compares two options and
-recommends one. Nothing here is implemented; the current wire protocol is still
-v2 (the 1d replay-protected frame) with the single-message hello/reply handshake
-described in §2.
+Status: **Amended design — Option B approved, awaiting sign-off. No code.**
+
+Decision recorded on 2026-10-31:
+
+- **Option B — SIGMA-style handshake on `cryptography` only** is chosen.
+- **Identity hiding is out of scope for 1e** and is documented as a limitation
+  (§10).
+- **Rekey** ships as re-running the handshake first; the `REKEY` packet
+  (`0x04`) is a follow-up (§4.9).
+- **ADR-0028** is reserved for the later security-audit summary (0027 is
+  taken by the transcript-binding gap).
 
 Related documents:
 
 - [`docs/design/1d-replay-protection.md`](1d-replay-protection.md) — the frame,
-  key schedule and session model this design has to compose with.
+  key schedule and session model this design composes with.
 - [`docs/adr/0027-handshake-transcript-binding-gap.md`](../adr/0027-handshake-transcript-binding-gap.md)
   — the gap this item closes.
 - [`docs/adr/0018-key-exchange-handshake.md`](../adr/0018-key-exchange-handshake.md)
@@ -22,410 +29,381 @@ Related documents:
 
 ## 1. Scope
 
-Item 1e replaces the handshake. It must deliver, by design rather than by
-accident:
+1e replaces the handshake and must deliver, by design rather than by accident:
 
-1. **Freshness from both sides.** Every handshake must mix fresh randomness
-   contributed by *both* peers into the key schedule, so a captured handshake
-   can never be replayed to reproduce a session.
-2. **Transcript binding.** Every identity field, ephemeral key, nonce and
-   advertised port that the session depends on must be covered by an
-   authenticated value (a signature or a MAC), so none of them can be
-   relabelled in flight.
-3. **Mutual authentication** against the long-term identity (Ed25519 today).
-4. **Explicit key confirmation**, so neither side starts sending file data
-   before the other has proven it derived the same keys.
-5. **Forward secrecy** — compromise of long-term identity keys must not expose
-   past session keys.
-6. **Composition with 1d** — the output must still be
-   `(session_id, role, send_key, receive_key)` so `SecureChannel`,
-   `SessionStore`, the frame and the anti-replay window are unchanged.
+1. **Freshness from both sides** — every handshake mixes fresh randomness from
+   both peers into the key schedule, so a captured handshake cannot reproduce a
+   session.
+2. **Transcript binding** — every identity field, public key, ephemeral, nonce
+   and advertised port is covered by an authenticated value.
+3. **Mutual authentication** against the long-term Ed25519 identity.
+4. **Explicit key confirmation** — no application data before the peer proves it
+   derived the same keys.
+5. **Forward secrecy** — long-term key compromise does not expose past sessions.
+6. **Composition with 1d** — the output is still
+   `(session_id, role, send_key, receive_key, peer_transfer_port,
+   peer_manifest_port)`, so `SecureChannel`, `SessionStore`, the frame and
+   `AntiReplayWindow` are unchanged.
 
-Explicitly **out of scope** for 1e: pairing UX and the `pair/trust/untrust`
-commands (that is 1f, discussed in §8), additional security tests beyond the
-handshake (1g), and the ADR-0027/threat-model-to-test mapping (1h).
+Out of scope for 1e: pairing UX and the `pair/trust/untrust` commands (1f, §7),
+extra security tests beyond the handshake (1g), and the ADR-0027 /
+threat-model-to-test mapping (1h).
 
 ---
 
-## 2. What exists today (v2), precisely
+## 2. Current v2 baseline
 
 The current handshake is a **single msgpack message each way**, length-prefixed
 with a 4-byte big-endian prefix (`read_length_prefixed`, bounded by
-`MAX_HANDSHAKE_MESSAGE_SIZE`). It lives in
+`MAX_HANDSHAKE_MESSAGE_SIZE`), in
 `src/securesync/infrastructure/networking/x25519_handshake.py`.
 
-### 2.1 Hello (initiator → responder)
+- Hello: `device_id`, `transfer_port`, `manifest_port`, `salt` (16 B),
+  `public_key` (X25519, 32 B), `identity_public_key` (Ed25519, 32 B),
+  `signature = Ed25519(salt ‖ public_key)`.
+- Reply: same shape, fresh responder ephemeral, `signature =
+  Ed25519(request_salt ‖ responder_public_key)`.
+- Key schedule: `master = HKDF(ss, salt, lp("securesync-master-v2") ‖ lp(e_i) ‖
+  lp(e_r))`; `session_id` and the directional keys follow
+  (`session_keys.derive_session_keys`).
 
-| Field | Size | Notes |
-|---|---|---|
-| `device_id` | variable (msgpack) | config string or `uuid4()`, **independent of the identity key** (`main.py:117`) |
-| `transfer_port` | int | advertised chunk-transfer port |
-| `manifest_port` | int | advertised manifest-exchange port |
-| `salt` | 16 bytes | fresh, from the initiator |
-| `public_key` | 32 bytes | initiator X25519 ephemeral |
-| `identity_public_key` | 32 bytes | initiator Ed25519 long-term public key |
-| `signature` | 64 bytes | `Ed25519(salt ‖ public_key)` |
-
-### 2.2 Reply (responder → initiator)
-
-Same shape, with a **fresh** responder X25519 ephemeral generated per
-connection, and `signature = Ed25519(request_salt ‖ responder_public_key)`.
-
-### 2.3 Key schedule (v2)
-
-```text
-master     = HKDF(ECDH(e_i, e_r), salt,
-                  lp("securesync-master-v2") ‖ lp(e_i) ‖ lp(e_r))
-session_id = HKDF(ECDH(e_i, e_r), salt,
-                  lp("securesync-session-id") ‖ lp(e_i) ‖ lp(e_r))[:8]
-i2r_key    = HKDF(master, "",
-                  lp("securesync-initiator-to-responder") ‖ lp(id_i) ‖ lp(id_r)
-                  ‖ session_id ‖ lp(e_i) ‖ lp(e_r))
-r2i_key    = HKDF(master, "",
-                  lp("securesync-responder-to-initiator") ‖ … same common …)
-```
-
-`lp(x)` is a 2-byte big-endian length followed by `x`
-(`session_keys.length_prefixed`).
-
-### 2.4 What the current signatures actually cover
-
-- `sig_i` covers `salt ‖ e_i`.
-- `sig_r` covers `salt ‖ e_r`.
-
-Neither signature covers the other side's identity or ephemeral, and **neither
-covers `device_id` or the advertised ports**. That is the whole of ADR-0027:
-
-| Property | Current v2 | Consequence |
-|---|---|---|
-| Freshness | responder ephemeral only, **unsigned by the initiator** | a replayed hello gets a new `session_id` only because the responder happens to draw a fresh ephemeral; the protection is incidental |
-| Transcript binding | none | `device_id`, `transfer_port`, `manifest_port` are malleable (two strict-`xfail` tests) |
-| Key confirmation | none | no proof the peer derived the same keys before data flows |
-| Identity hiding | none | both identities travel in cleartext |
-
-The replay test file proves the practical impact: a replayed hello does **not**
-reproduce a session today (fresh responder ephemeral ⇒ different shared secret ⇒
-different `session_id` ⇒ the captured frame names a vanished session and is
-dropped with `UnknownSessionError`), but if a session id were ever reproducible
-a captured frame would be accepted with a fresh window and counters reset, with
-only the timestamp skew in the way. 1e must make that impossible by design.
+Each signature covers **only `salt ‖ its own ephemeral`**. `device_id`, both
+public keys and both ports travel outside the signed bytes, there is no
+freshness check and no key confirmation. That is ADR-0027. The replay tests show
+a replayed hello does not currently reproduce a session — but only because the
+responder happens to draw a fresh ephemeral, not because anything enforces it.
 
 ---
 
-## 3. Option A — Noise XX (`Noise_XX_25519_ChaChaPoly_SHA256`)
+## 3. Options considered
 
-### 3.1 Pattern
+### 3.1 Option A — Noise XX (rejected)
 
-Noise XX has no pre-messages and three flights:
+`Noise_XX_25519_ChaChaPoly_SHA256`, three flights (`-> e`, `<- e, ee, s, es`,
+`-> s, se`). It would give mutual auth, freshness, transcript binding and
+forward secrecy, and `Split()` maps cleanly onto the 1d keys. It was rejected
+for two reasons.
+
+**No usable Python library.** Checked 2026-10-31:
+
+| Package | Version | Last release | `requires_python` | Health |
+|---|---|---|---|---|
+| `noiseprotocol` | 0.3.1 | **2020-03-03** | `~=3.5` | MIT, 222★, 7 open issues, last push 2023-05-09, historically Linux-only CI |
+| `noiseframework` | 1.3.0 | 2025-11-25 | `>=3.8` | MIT, **0★**, created 2025-11-16, 0.1.0→1.3.0 in 9 days, single author |
+| `noise-py` | 0.0.4 | 2015-10-13 | — | unrelated (`eleme/noise` client) |
+| `pynoise` | 3.0.0 | 2025-08-06 | — | libnoise terrain maps |
+| `noise` | 1.2.2 | — | — | Perlin noise |
+| `snow` | 0.3.1 | 2020-06-05 | — | ServiceNow asyncio client |
+
+There is no maintained, widely-vetted Python Noise implementation.
+
+**Identity-model migration.** Noise authenticates with **static X25519 keys**
+(`s` is a DH key), not Ed25519 signatures. Adopting it forces a static X25519
+identity, a device ID derived from that key, and re-pinning every peer in the
+trust store — or a dual-key model. That is a large, breaking change for no
+security property we cannot get with B.
+
+### 3.2 Option B — SIGMA-style (chosen)
+
+A three-message SIGMA construction using only `cryptography`: X25519 ECDH,
+Ed25519 signatures, HKDF-SHA256, HMAC-SHA256 and the existing
+`length_prefixed`. It keeps Ed25519, `device_id` and the trust store unchanged,
+reuses the 1d helpers, and gives explicit key confirmation. Its cost is that we
+implement a small protocol in-tree — stated plainly in §8 and §10.
+
+---
+
+## 4. The v3 handshake (normative)
+
+### 4.1 Conventions
+
+- All integers are **big-endian**.
+- `lp(x)` = 2-byte BE length ‖ `x` (`session_keys.length_prefixed`).
+- `H = SHA256`.
+- `T1 = b"securesync-1e-handshake-v1"` prefixes every hash and signature.
+- Each message is framed by the existing 4-byte BE length prefix
+  (`read_length_prefixed`); the bytes below are the payload **after** that
+  prefix.
+- `HANDSHAKE_VERSION = 3`, equal to `CURRENT_VERSION` after 1e.
+- The handshake messages are **not** 1d frames. The 1d frame
+  (`version|direction|packet_type|session_id|nonce|ciphertext|tag`) starts only
+  after the handshake completes.
+
+### 4.2 Message 1 — initiator → responder (unsigned)
+
+| Offset | Size | Field | Notes |
+|---|---|---|---|
+| 0 | 1 | `version` | `0x03`; anything else ⇒ `UnsupportedVersionError` |
+| 1 | 1 | `msg_type` | `0x01` |
+| 2 | 32 | `e_i` | initiator X25519 ephemeral public key |
+| 34 | 32 | `n_i` | initiator nonce from the CSPRNG |
+| 66 | 2 | `id_i_len` | uint16 BE |
+| 68 | `id_i_len` | `id_i` | initiator `device_id`, UTF-8 |
+| 68+L | 32 | `id_pub_i` | initiator Ed25519 identity public key |
+| 100+L | 2 | `transfer_port_i` | uint16 BE |
+| 102+L | 2 | `manifest_port_i` | uint16 BE |
+
+Total = **104 + L** bytes. Message 1 carries **no signature**: the initiator
+does not yet know `e_r`, so it cannot sign the full transcript (see §5 for the
+DoS trade-off and §4.5 for why the signature moved to message 3).
+
+### 4.3 Message 2 — responder → initiator
+
+| Offset | Size | Field | Notes |
+|---|---|---|---|
+| 0 | 1 | `version` | `0x03` |
+| 1 | 1 | `msg_type` | `0x02` |
+| 2 | 32 | `e_r` | responder X25519 ephemeral public key (fresh) |
+| 34 | 32 | `n_r` | responder nonce from the CSPRNG |
+| 66 | 2 | `id_r_len` | uint16 BE |
+| 68 | Lr | `id_r` | responder `device_id`, UTF-8 |
+| 68+Lr | 32 | `id_pub_r` | responder Ed25519 identity public key |
+| 100+Lr | 2 | `transfer_port_r` | uint16 BE |
+| 102+Lr | 2 | `manifest_port_r` | uint16 BE |
+| 104+Lr | 64 | `sig_r` | Ed25519 over `t2` (§4.5) |
+| 168+Lr | 32 | `mac_r` | HMAC-SHA256(`k_r`, `t2s`) — key confirmation |
+
+Total = **200 + Lr** bytes.
+
+### 4.4 Message 3 — initiator → responder
+
+| Offset | Size | Field | Notes |
+|---|---|---|---|
+| 0 | 1 | `version` | `0x03` |
+| 1 | 1 | `msg_type` | `0x03` |
+| 2 | 64 | `sig_i` | Ed25519 over `t2s` (§4.5) |
+| 66 | 32 | `mac_i` | HMAC-SHA256(`k_i`, `t3s`) — key confirmation |
+
+Total = **98** bytes.
+
+### 4.5 Transcript and what is signed / MACed
+
+Let `m1` be the full message-1 payload, `m2body` the first `104 + Lr` bytes of
+message 2 (everything up to and including `manifest_port_r`), and `sk_*` /
+`id_pub_*` the Ed25519 keys.
 
 ```text
-XX:
-  -> e
-  <- e, ee, s, es
-  -> s, se
+t2      = H(T1 ‖ lp(m1) ‖ lp(m2body))          # message 1 + message 2 fields
+sig_r   = Ed25519_sign(sk_r, t2)               # responder authenticates the transcript
+t2s     = H(t2 ‖ lp(sig_r))                    # transcript including sig_r
+mac_r   = HMAC-SHA256(k_r, t2s)                # responder key confirmation
+t3      = H(t2s ‖ lp(mac_r))
+sig_i   = Ed25519_sign(sk_i, t2s)              # initiator signs the full transcript
+t3s     = H(t3 ‖ lp(sig_i))
+mac_i   = HMAC-SHA256(k_i, t3s)                # initiator key confirmation
+t_final = H(t3s ‖ lp(mac_i))                   # SAS material (§7)
 ```
 
-1. **Initiator → Responder:** ephemeral public key `e`.
-2. **Responder → Initiator:** ephemeral `e`, `ee` DH, encrypted static `s`,
-   `es` DH.
-3. **Initiator → Responder:** encrypted static `s`, `se` DH.
-
-After flight 3 both sides have authenticated the other's static key and share a
-`CipherState` pair from `Split()`.
-
-### 3.2 Python library landscape (checked 2026-10-31)
-
-| Package | Version | Last release | `requires_python` | Health | Verdict |
-|---|---|---|---|---|---|
-| `noiseprotocol` | 0.3.1 | **2020-03-03** | `~=3.5` | MIT, 222★, 7 open issues, repo last pushed 2023-05-09, CI historically Linux-only | Mature but **unmaintained** for 6.5 years; untested on Windows (our CI matrix includes Windows) and on 3.12/3.13 |
-| `noiseframework` | 1.3.0 | 2025-11-25 | `>=3.8` | MIT, **0★**, created 2025-11-16, 1 open issue, single author, 0.1.0→1.3.0 in 9 days | Supports `Noise_XX_25519_ChaChaPoly_SHA256`, but **unvetted** — unacceptable as a security-critical dependency |
-| `noise-py` | 0.0.4 | 2015-10-13 | — | client for an unrelated `eleme/noise` project | Not the Noise Protocol |
-| `pynoise` | 3.0.0 | 2025-08-06 | — | libnoise (terrain/Perlin maps) | Not the Noise Protocol |
-| `noise` | 1.2.2 | — | — | Perlin noise | Not the Noise Protocol |
-| `snow` | 0.3.1 | 2020-06-05 | — | ServiceNow asyncio client | Not the Noise Protocol |
-
-There is **no maintained, widely-vetted Python Noise implementation**. The
-choice is therefore between a stale-but-mature library and a brand-new
-single-author one — or implementing the state machine ourselves.
-
-### 3.3 Identity model change
-
-Noise authenticates with **static X25519 keys** (`s` is a DH public key), not
-Ed25519 signatures. SecureSync's identity is an Ed25519 keypair
-(`Ed25519IdentityProvider`), and the trust store pins
-`device_id → Ed25519 public key`. Adopting Noise forces one of:
-
-- **A1 — replace Ed25519 with static X25519.** `device_id` would be derived
-  from the static public key (e.g. `base32(SHA256(pk))[:16]`) instead of being a
-  free config string / `uuid4`. The trust store re-pins every peer under the new
-  key type, and `securesync init` changes.
-- **A2 — dual keys.** Keep Ed25519 for compatibility and add a static X25519 for
-  Noise. Two long-term keys, two trust anchors, more to get wrong.
-- **A3 — Ed25519 inside Noise.** Not possible: the `s` token is a DH public key,
-  and the signature-based Noise variants are non-standard extensions.
-
-All three are a breaking change to the identity model, the trust store and the
-`init` UX.
-
-### 3.4 Composition with 1d
-
-Good news: the composition is clean. Noise `Split()` yields two 32-byte
-transport keys, one per direction. Map them directly:
-
-```text
-i2r_key, r2i_key = Split(ck)              # Noise transport keys
-session_id       = SHA256(final_h)[:8]    # or HKDF(ck, "securesync-1e-sid")[:8]
-role             = initiator | responder
-```
-
-`SecureChannel`, `SessionStore`, the v2 frame
-(`version|direction|packet_type|session_id|nonce|ciphertext|tag`) and
-`AntiReplayWindow` all keep working unchanged — they only consume
-`(session_id, role, send_key, receive_key)`.
-
-### 3.5 Security properties
-
-| Property | Noise XX |
+| Value | Covers |
 |---|---|
-| Mutual authentication | Yes (static DH) |
-| Freshness | Yes (both ephemerals mixed into `ck`/`h`) |
-| Transcript binding | Yes (handshake hash `h`) |
-| Key confirmation | **Implicit** (first transport message); an explicit MAC must be added |
-| Identity hiding | Yes against passive observers; no against active attackers |
-| Forward secrecy | Yes (`ee`) |
-| Replay | Prevented (fresh ephemerals + `h`) |
-| Malleability | Prevented (everything is inside the encrypted/authenticated transcript) |
+| `sig_r` | `version`, `e_i`, `n_i`, `id_i`, `id_pub_i`, ports_i, `e_r`, `n_r`, `id_r`, `id_pub_r`, ports_r |
+| `sig_i` | all of the above **plus `sig_r`** |
+| `mac_r` | `t2s` (the whole transcript including `sig_r`) |
+| `mac_i` | `t3s` (the whole transcript including `sig_i`) |
+| session keys | `master`, which mixes `t2` and both nonces (§4.6) |
 
-### 3.6 What we must implement
+Every field the session depends on is inside an authenticated value. In
+particular `device_id` and both ports are now in the transcript, which retires
+the two strict-`xfail` malleability tests
+(`test_relabelled_device_id_is_rejected`,
+`test_relabelled_ports_are_rejected`).
 
-- **With `noiseprotocol`:** the 3-flight wiring, mapping `Split()` to the 1d
-  keys, an explicit key-confirmation MAC, and a `session_id` derivation. No
-  crypto, but we inherit an unmaintained dependency and an identity migration.
-- **DIY:** the full Noise state machine — `InitializeSymmetric`, `MixHash`,
-  `MixKey`, `EncryptAndHash`, `DecryptAndHash`, `Split`, plus XX message
-  handling — validated against the official Noise test vectors. This is several
-  hundred lines of subtle, security-critical code.
-
-### 3.7 Migration cost
-
-**High.** Identity model (Ed25519 → static X25519), trust-store migration,
-`init` UX, `HandshakeResult`, every handshake test, the `paired_sessions()`
-helper, and a protocol bump to v3. Plus a dependency decision with no good
-answer (§3.2).
-
-### 3.8 Test plan
-
-- Official Noise XX test vectors (handshake hash and transport keys).
-- Interop against `noiseprotocol` if we implement the state machine ourselves.
-- Replay: replayed flight 1 yields no session; a full replayed handshake is
-  rejected because the responder draws fresh ephemerals.
-- Malleability: flipping any byte in any flight fails authentication;
-  relabelled identity/ports fail.
-- Key confirmation: MAC mismatch ⇒ reject.
-- Forward secrecy: static-key compromise does not yield past session keys.
-
----
-
-## 4. Option B — SIGMA-style handshake on `cryptography` only
-
-A simplified SIGMA (the construction IKEv2 is based on), built from primitives
-the project already uses: X25519 ECDH, Ed25519 signatures, HKDF-SHA256,
-HMAC-SHA256, and `length_prefixed`.
-
-### 4.1 Design
-
-Three messages. `H = SHA256`, `lp(x)` = 2-byte BE length ‖ `x`, and
-`T1 = b"securesync-1e-handshake-v1"` is a domain-separation prefix on every
-hash and signature.
-
-**Message 1 (initiator → responder)**
+### 4.6 Key schedule
 
 ```text
-type      : 1 byte   0x01
-e_i       : 32       initiator X25519 ephemeral public key
-n_i       : 32       initiator random nonce
-id_i_len  : 2        big-endian
-id_i      : variable initiator device_id (UTF-8)
-sig_i     : 64       Ed25519
-```
-
-```text
-sig_i = Ed25519_sign(sk_i, H(T1 ‖ 0x01 ‖ lp(e_i) ‖ lp(n_i) ‖ lp(id_i)))
-```
-
-**Message 2 (responder → initiator)**
-
-```text
-type      : 1 byte   0x02
-e_r       : 32       responder X25519 ephemeral public key (fresh)
-n_r       : 32       responder random nonce (fresh)
-id_r_len  : 2
-id_r      : variable responder device_id
-sig_r     : 64       Ed25519
-mac_r     : 32       HMAC-SHA256 key confirmation
-```
-
-```text
-t2    = H(T1 ‖ 0x02 ‖ lp(e_i) ‖ lp(n_i) ‖ lp(id_i)
-                 ‖ lp(e_r) ‖ lp(n_r) ‖ lp(id_r))
-sig_r = Ed25519_sign(sk_r, t2)
-t2s   = H(t2 ‖ lp(sig_r))
-ss    = X25519(e_i_priv, e_r)          # responder computes with e_r_priv
-master = HKDF(ss, salt = lp(n_i) ‖ lp(n_r),
-              info = lp("securesync-1e-master") ‖ lp(e_i) ‖ lp(e_r)
-                     ‖ lp(id_i) ‖ lp(id_r))
-k_r    = HKDF(master, lp("securesync-1e-kr"))
-mac_r  = HMAC-SHA256(k_r, t2s)
-```
-
-**Message 3 (initiator → responder)**
-
-```text
-type      : 1 byte   0x03
-mac_i     : 32       HMAC-SHA256 key confirmation
-```
-
-```text
-k_i    = HKDF(master, lp("securesync-1e-ki"))
-t3     = H(t2s ‖ lp(mac_r))
-mac_i  = HMAC-SHA256(k_i, t3)
-```
-
-**Transport keys** (identical derivation on both sides):
-
-```text
+ss         = X25519(e_i_priv, e_r)
+master     = HKDF(ss, salt = lp(n_i) ‖ lp(n_r),
+                  info = lp("securesync-1e-master") ‖ t2)
+k_r        = HKDF(master, lp("securesync-1e-kr"))
+k_i        = HKDF(master, lp("securesync-1e-ki"))
 session_id = HKDF(master, lp("securesync-1e-sid"), length = 8)
 common     = lp(id_i) ‖ lp(id_r) ‖ session_id ‖ lp(e_i) ‖ lp(e_r)
 i2r_key    = HKDF(master, lp("securesync-1e-i2r") ‖ common)
 r2i_key    = HKDF(master, lp("securesync-1e-r2i") ‖ common)
 ```
 
-### 4.2 What is signed / MACed
+`master` binds `t2` (both messages' fields) and both nonces, so the keys depend
+on the whole transcript. `k_r` and `k_i` are separate confirmation keys, which
+prevents reflection of a confirmation MAC. The directional keys follow the 1d
+shape, so `derive_directional_keys` can be reused with the new `master` and
+`session_id`.
 
-| Value | Covers |
-|---|---|
-| `sig_i` | `T1`, message type, `e_i`, `n_i`, `id_i` |
-| `sig_r` | `T1`, message type, **the entire message 1**, `e_r`, `n_r`, `id_r` |
-| `mac_r` | `t2s` = the message-2 transcript **including `sig_r`** |
-| `mac_i` | `t3` = the full transcript **including `mac_r`** |
-| transport keys | `master` ⇒ `ss`, both nonces, both ephemerals, both ids |
+### 4.7 Version byte and downgrade protection
 
-The responder's signature binds the initiator's contribution, and the
-initiator's confirmation MAC binds the responder's signature. Nothing that the
-session depends on is left outside an authenticated value — including
-`device_id` and the advertised ports (which move into the signed transcript).
+The first payload byte is the version. Before parsing anything else the receiver
+compares it with `CURRENT_VERSION`; a mismatch raises `UnsupportedVersionError`
+(the class already used by the 1d frame decoder) **before** any X25519 or
+Ed25519 work.
 
-### 4.3 Explicit rekey
+A v2 peer sends a msgpack hello whose first byte is a msgpack type
+(`0x8x`/`0xde`), so a v3 receiver rejects it cleanly. v2 and v3 cannot
+interoperate; this is a deliberate breaking change, the same as the v1→v2 frame
+break. The version is also inside `t2`/`t2s`, so a downgrade attempt that
+somehow reached the transcript would fail the signature.
 
-Add `PACKET_REKEY = 0x04` to `PacketType` (the value is free between `AUTH =
-0x03` and `FILE_MANIFEST = 0x10`). A `REKEY` frame is the last frame encrypted
-under the old key; both sides then compute:
+### 4.8 No application data before confirmation
+
+`PeerSession.confirmed` is `False` until the role's confirmation point:
+the initiator after `mac_r` (message 2), the responder after message 3.
+`SecureChannel.seal` (or the transport wrapper) must refuse to encrypt for an
+unconfirmed session. This closes the ADR-0027 item "no key confirmation, so a
+responder commits a session it never learns is usable."
+
+### 4.9 Explicit rekey
+
+For 1e, rekey is **re-running the handshake**, which is exactly what 1d already
+assumes on counter exhaustion (`CounterExhaustedError` → open a new session).
+The `REKEY` packet is a follow-up:
+
+- `PACKET_REKEY = 0x04` (free between `AUTH = 0x03` and
+  `FILE_MANIFEST = 0x10`).
+- The `REKEY` frame is the last frame under the old key; both sides then derive
+  `master' = HKDF(master, lp("securesync-1e-rekey") ‖ lp(rekey_counter))` and
+  re-derive `session_id'`, `i2r'`, `r2i'`.
+- `rekey_counter` starts at 1 and increments per rekey; a stale or out-of-order
+  `REKEY` is rejected.
+
+---
+
+## 5. DoS analysis of the unsigned message 1
+
+Because message 1 is unsigned, the responder cannot verify the initiator before
+doing work. Per message 1 it does: rate-limit check (O(1)), parse (O(L)), one
+X25519 keypair, one ECDH, one Ed25519 signature and a few HKDF calls — well
+under a millisecond on a modern CPU.
+
+**Assessment: I agree with moving the signature to message 3, with conditions.**
+
+- Signing message 1 would **not** reduce the responder's crypto cost: it still
+  does the same keypair, ECDH and signature. It would only let the responder run
+  one extra Ed25519 *verify* before responding — a marginal saving — while
+  making message 1 replayable and revealing the initiator's identity to a
+  passive observer. So the unsigned message 1 is the better trade.
+- The exposure is bounded by the existing per-source-IP limiter
+  (`MAX_HANDSHAKES_PER_IP = 30` per 60 s), the existing
+  `MAX_CONCURRENT_CONNECTIONS`, and two new limits: a **half-open cap**
+  (`MAX_HALF_OPEN`, suggested 64) and a **handshake timeout**
+  (`HANDSHAKE_TIMEOUT_S`, suggested 10 s).
+- The responder must **not allocate a `PeerSession`** until message 3 verifies.
+  The half-open state (ephemerals, nonces, `master`, `k_r`, `k_i`, transcript,
+  deadline) is a transient object bounded by `MAX_HALF_OPEN`.
+- Before 1f, trust-on-first-use means unknown devices must be accepted, so the
+  rate limiter is the primary defence. After 1f, the responder can reject an
+  unknown `device_id` before any crypto.
+- Optional later hardening (not in 1e): a stateless cookie, as in TLS 1.3 or
+  IKEv2, to make the responder prove reachability before doing ECDH. It costs a
+  round-trip and is not needed while the limiter holds.
+
+---
+
+## 6. State machines
+
+### 6.1 Initiator
+
+| State | Entry | On event | Next |
+|---|---|---|---|
+| `IDLE` | — | `initiate()` | build `m1`, send, `SENT_HELLO` |
+| `SENT_HELLO` | `m1` sent | `m2` received | check version, parse, compute `t2`, verify `sig_r` (Ed25519 + TOFU pin), derive `master`/`k_r`/`k_i`/keys, verify `mac_r`, send `m3`, `CONFIRMED` |
+| `SENT_HELLO` | — | timeout / parse error / bad version / bad `sig_r` / TOFU mismatch / bad `mac_r` | `FAILED` |
+| `CONFIRMED` | `m3` sent | application data | send under `i2r_key` |
+| any | — | close | `CLOSED` |
+
+The initiator is **confirmed after `mac_r`** (message 2). It may send
+application data once `m3` is sent.
+
+### 6.2 Responder
+
+| State | Entry | On event | Next |
+|---|---|---|---|
+| `WAIT_HELLO` | — | `m1` received | rate-limit check, version check, parse, (post-1f: known device check), generate `e_r`/`n_r`, ECDH, derive `master`/`k_r`/`k_i`, compute `t2`/`sig_r`/`t2s`/`mac_r`, send `m2`, `SENT_REPLY` |
+| `SENT_REPLY` | `m2` sent | `m3` received | check version, parse, compute `t3`/`t3s`, verify `sig_i` (Ed25519 + TOFU pin), verify `mac_i`, derive keys, store `PeerSession(confirmed=True)`, `CONFIRMED` |
+| `SENT_REPLY` | — | timeout / parse error / bad `sig_i` / TOFU mismatch / bad `mac_i` | `FAILED` |
+| `CONFIRMED` | session stored | application data | send under `r2i_key` |
+| any | — | close | `CLOSED` |
+
+The responder is **confirmed after message 3**. On `FAILED` it discards the
+transient state and stores no session.
+
+### 6.3 Half-open state, caps and timeouts
+
+- `SENT_REPLY` is the half-open state. It counts against `MAX_HALF_OPEN`; a new
+  message 1 over the cap is refused before any crypto.
+- Each wait state has `HANDSHAKE_TIMEOUT_S` (suggested 10 s); on expiry the
+  connection is closed and the transient state dropped.
+- The per-source-IP limiter stays exactly where 1d put it: in
+  `HandshakeServer._handle_connection`, before `accept()` and before any
+  X25519/Ed25519 work.
+
+---
+
+## 7. Pairing / SAS (for 1f)
+
+### 7.1 Derivation
 
 ```text
-master'    = HKDF(master, lp("securesync-1e-rekey") ‖ lp(rekey_counter))
-session_id'= HKDF(master', lp("securesync-1e-sid"), length = 8)
-i2r', r2i' = … same directional derivation from master' and session_id' …
+sas_material = H(T1 ‖ b"-sas" ‖ t_final)
 ```
 
-`rekey_counter` starts at 1 and increments per rekey; a `REKEY` frame received
-out of order or with a stale counter is rejected. The simpler fallback — and
-what 1d already assumes — is to open a **new handshake** on counter exhaustion;
-1e can ship re-running the handshake first and add `REKEY` later.
+`t_final` already binds both Ed25519 identities, both ephemerals, both nonces,
+both signatures and both confirmation MACs, so a matching SAS proves no MITM.
 
-### 4.4 Security properties
+### 7.2 Display
 
-| Property | SIGMA-style |
-|---|---|
-| Mutual authentication | Yes (`sig_i`, `sig_r`) |
-| Freshness | Yes (fresh `e_i, e_r, n_i, n_r`; `sig_r` binds message 1) |
-| Transcript binding | Yes (explicit transcript hash; ids and ports inside it) |
-| Key confirmation | **Explicit** (`mac_r`, `mac_i`) |
-| Identity hiding | **No** (ids are cleartext; can be added by encrypting them under a key derived from `ss`) |
-| Forward secrecy | Yes (ephemeral ECDH; static keys only sign) |
-| Replay | Replayed message 1 ⇒ responder answers with fresh `e_r/n_r`, attacker cannot produce `mac_i`; a full replay fails the transcript hash |
-| Reflection | Direction-specific type bytes and separate `k_r`/`k_i` keys |
-| Malleability | Any byte flip breaks a signature or MAC |
+- Default: **8 decimal digits**, `int.from_bytes(sas_material[:8], "big") %
+  100_000_000`, zero-padded. That is 26.6 bits.
+- Recommended if the UI allows: **4 words** from a 2048-word list (11 bits per
+  word, 44 bits), which is materially stronger against an online guess.
 
-### 4.5 What we must implement
+### 7.3 Attempt limits
 
-The three-message state machine (~250–400 lines) on top of `cryptography`. No
-new dependency. We reuse from 1d: `length_prefixed`, the HKDF helpers, the
-`SessionKeys`/`HandshakeResult` shapes, the frame, the anti-replay window and
-the session store.
+- `MAX_SAS_ATTEMPTS = 3` failed confirmations per peer per 10 minutes, then the
+  peer is locked out until `securesync untrust` and a fresh `pair`.
+- `pair` is also rate-limited per source IP, reusing `SourceIpRateLimiter`.
+- A failed pairing discards the session and the half-open state; no trust is
+  pinned.
 
-### 4.6 Migration cost
-
-**Medium.** Keep Ed25519 identity, `device_id`, and the trust store as they are.
-Replace `initiate`/`accept` with the 3-flight flow, extend the key schedule with
-nonces and the transcript hash, bump `CURRENT_VERSION` to 3, and update the
-handshake tests and `paired_sessions()`. No identity migration, no `init`
-change.
-
-### 4.7 Test plan
-
-1. Happy path: both sides derive the same `session_id`, `i2r`, `r2i`.
-2. Replay message 1: no session; replay all three: rejected (fresh `e_r/n_r`).
-3. Malleability: flip each field ⇒ signature/MAC failure; relabel `device_id`
-   or ports ⇒ failure (this retires the two strict-`xfail` tests).
-4. MITM: substituted ephemeral ⇒ signature failure.
-5. Key confirmation: wrong `mac_r`/`mac_i` ⇒ reject.
-6. Forward secrecy: static-key compromise does not yield session keys.
-7. Reflection: message 2 fed to an initiator is rejected on type/prefix.
-8. Known-answer test with fixed keys and nonces.
+`securesync pair` runs the handshake, shows the SAS, waits for confirmation,
+then pins the Ed25519 key. `securesync untrust` deletes the pin and purges every
+session for that peer via the existing `SessionStore.remove_by_peer`. Note the
+current CLI is misleading: `securesync trust <device>` currently **deletes** the
+pin; 1f should split it into `trust` (confirm/pin) and `untrust`
+(forget + purge).
 
 ---
 
-## 5. Side-by-side comparison
+## 8. Why not TLS 1.3 mutual authentication with pinned self-signed certificates?
 
-| Criterion | A — Noise XX | B — SIGMA-style |
-|---|---|---|
-| Mutual authentication | Yes | Yes |
-| Freshness | Yes | Yes |
-| Transcript binding | Yes (`h`) | Yes (explicit) |
-| Key confirmation | Implicit (add MAC) | Explicit |
-| Identity hiding | Passive: yes; active: no | No (optional) |
-| Forward secrecy | Yes | Yes |
-| Identity model | Static X25519 (**change**) | Ed25519 (**unchanged**) |
-| Trust store | Re-pin (migration) | Unchanged |
-| New dependency | `noiseprotocol` (stale) or `noiseframework` (unvetted) or DIY | None |
-| Code we write | Wire + mapping, or full state machine | 3-flight state machine |
-| Migration cost | **High** | **Medium** |
-| Composes with 1d | Yes | Yes |
-| Auditability | Depends on library | Fully ours, small |
+Python's `ssl` module supports TLS 1.3, mutual authentication with client
+certificates, and certificate pinning. Using it would mean **zero custom
+crypto** and an audited handshake. It is, honestly, the better choice for a
+production product. We still choose Option B because:
 
----
+1. **It would discard the 1d work.** The frame, the HKDF key schedule, the
+   `SessionStore`, the anti-replay window and their tests are all built around a
+   handshake that yields `(session_id, role, send_key, receive_key)`. TLS gives
+   a byte stream with no such model; wiring it in means deleting or bypassing
+   most of 1d.
+2. **It needs an X.509 identity layer.** The project's identity is an Ed25519
+   keypair and a `device_id`, pinned in a JSON trust store. TLS wants
+   certificates, chain validation, rotation and pinning — a second identity
+   system to build, test and document.
+3. **It removes the educational value.** SecureSync exists to demonstrate
+   protocol design end to end. Delegating the handshake to `ssl` would make the
+   replay-protection and session work pointless as a portfolio piece.
+4. **It still needs careful configuration** (verification modes, SNI, ALPN,
+   hostname checks) and would not give the `session_id`/role model the 1d frame
+   depends on.
 
-## 6. Recommendation: Option B (SIGMA-style)
-
-1. **No acceptable Noise library exists in Python.** `noiseprotocol` has not
-   shipped since March 2020 and targets Python 3.5 with historically Linux-only
-   CI; `noiseframework` is a 0-star, single-author package created in November
-   2025. For a project that claims honesty over marketing, neither is a
-   defensible security-critical dependency.
-2. **It preserves the identity model.** Ed25519, `device_id` and the trust store
-   stay as they are; there is no peer re-pinning and no `init` change.
-3. **It reuses 1d.** The HKDF helpers, `length_prefixed`, `SessionKeys`, the
-   frame and the anti-replay window are already built and tested.
-4. **Explicit key confirmation** is a first-class part of the design rather than
-   something bolted onto Noise.
-5. **It is auditable.** ~300 lines we can read, test and explain, versus
-   trusting an unmaintained or unvetted state machine.
-
-The honest trade-off: we are implementing a security protocol ourselves. That is
-acceptable here because it is a small, well-understood three-message
-construction, it is tested hard (replay, malleability, MITM, confirmation,
-forward secrecy), and the alternative libraries are worse. The main cost is
-code we must get right, not a dependency we cannot audit.
-
-Known limitation to state in the docs: **no identity hiding** against passive
-observers. Acceptable for LAN peer-to-peer sync; can be added later by
-encrypting `id_i`/`id_r` under a key derived from `ss`.
+The honest conclusion: **TLS 1.3 would be the right engineering choice for a
+product; Option B is the right choice for this project**, and the handshake is
+therefore a **custom, unaudited protocol** (§10). This section will become an
+ADR (see §12).
 
 ---
 
-## 7. Composition with 1d (both options)
+## 9. Composition with 1d
 
-Both options emit the same contract, so nothing downstream changes:
+Both the handshake and the 1d layer meet at one contract:
 
 ```text
 HandshakeResult(session_id, role, send_key, receive_key,
@@ -439,44 +417,64 @@ HandshakeResult(session_id, role, send_key, receive_key,
 
 ---
 
-## 8. How 1f (explicit pairing) plugs into each option
+## 10. Security properties and limitations
 
-1f adds a short fingerprint / SAS, `securesync pair`, a real `trust`, and
-`untrust` that also purges sessions. Note the current CLI is already confusing:
-`securesync trust <device>` **deletes** the pin ("reset trust") — 1f should
-split that into `trust` (confirm/pin) and `untrust` (forget + purge).
+| Property | v3 SIGMA-style |
+|---|---|
+| Mutual authentication | Yes (`sig_r`, `sig_i`) |
+| Freshness | Yes (fresh `e_i, e_r, n_i, n_r`; `sig_r` binds message 1) |
+| Transcript binding | Yes (`t2`, `t2s`, `t3s`; ids and ports included) |
+| Key confirmation | **Explicit** (`mac_r`, `mac_i`) |
+| Identity hiding | **No** — `id_i`/`id_pub_i` are cleartext in message 1. Documented limitation; can be added later by encrypting them under a key derived from `ss`. |
+| Forward secrecy | Yes (ephemeral ECDH; static keys only sign) |
+| Replay | Replayed message 1 ⇒ responder answers with fresh `e_r/n_r`, attacker cannot produce `sig_i`/`mac_i`; a full replay fails the transcript hash |
+| Reflection | Direction-specific type bytes and separate `k_r`/`k_i` |
+| Malleability | Any byte flip breaks a signature or MAC |
+| Downgrade | Version byte checked first and bound into the transcript |
+| Audit status | **Custom, unaudited protocol** (primitives are audited; the composition is not) |
 
-### 8.1 With Option A (Noise XX)
-
-- The static X25519 keys are the pairing anchor. After the handshake both sides
-  know each other's static key, and Noise's handshake hash `h` binds them.
-- `SAS = H(h)` rendered as 6 digits or 4 words; users compare out-of-band.
-- `pair` = run the handshake, show the SAS, wait for confirmation, then pin the
-  static key. `untrust` deletes the pin and purges all sessions for that peer
-  (the 1d `SessionStore.remove_by_peer` already exists).
-
-### 8.2 With Option B (SIGMA-style)
-
-- `SAS = H(t3 ‖ lp(mac_i))`, i.e. the final transcript, which already includes
-  both Ed25519 identities, both ephemerals, both nonces, both signatures and
-  both confirmation MACs.
-- `pair` = run the 3-flight handshake, show the SAS, confirm, then pin the
-  Ed25519 key (the existing TOFU anchor). `untrust` deletes the pin and purges
-  sessions via `remove_by_peer`.
-- Because the SAS is derived from the same transcript the signatures cover, a
-  matching SAS proves no MITM — and the trust store type does not change.
-
-Either way, 1f is a thin layer over the 1e handshake: expose the final
-transcript hash, add two CLI commands, and call the existing session purge.
+The identity-hiding limitation is accepted for LAN peer-to-peer sync. It must
+be stated in `README.md` and `docs/security.md`, not only here.
 
 ---
 
-## 9. Decision needed
+## 11. Implementation plan (small green commits)
 
-Choose **A (Noise XX)** or **B (SIGMA-style)**. If B, confirm:
+Each commit passes the full gate (pytest, ruff, black --check, mypy --strict)
+and is pushed before the next begins.
 
-1. Identity hiding stays out of scope for 1e (cleartext ids), or is added now.
-2. Rekey ships as re-running the handshake first, with `REKEY` (0x04) as a
-   follow-up.
+1. **`feat(handshake): add v3 message encoding and known-answer tests`**
+   Pure encode/decode for `m1`/`m2`/`m3`, the version byte and the transcript
+   hashes, with fixed keys/nonces and frozen expected bytes. No wiring.
+2. **`feat(handshake): add the v3 key schedule`**
+   `master`/`k_r`/`k_i`/`session_id`/`i2r`/`r2i` and the SAS derivation, plus
+   tests (including a reflection test for `k_r` vs `k_i`).
+3. **`feat(handshake): add the initiator state machine`**
+   `initiate()` over the three flights, timeouts, `UnsupportedVersionError`,
+   TOFU checks, `mac_r` verification.
+4. **`feat(handshake): add the responder state machine`**
+   `accept()` over the three flights, half-open cap, timeout, `sig_i`/`mac_i`
+   verification, no session stored before confirmation.
+5. **`feat(protocol)!: wire the v3 handshake and bump CURRENT_VERSION to 3`**
+   `HandshakeResult`, `main.py`, the session coordinator, `HandshakeServer`,
+   integration tests, and a v2 peer rejected with `UnsupportedVersionError`.
+6. **`test(security): retire the hello-malleability xfails`**
+   Remove the two strict `xfail` markers and assert rejection; add replay,
+   MITM, key-confirmation and downgrade tests.
+7. **`docs: document the v3 handshake and the custom-protocol caveat`**
+   `docs/protocol.md`, `docs/security.md`, `README.md`, and the ADRs in §12.
 
-No implementation starts until this choice is made.
+---
+
+## 12. ADRs, documentation and sign-off
+
+- **ADR-0028 — security-audit summary.** Reserved; 0027 is taken. Written when
+  the audit is done.
+- **TLS rationale (§8)** becomes an ADR after 1e (0029 or later), or is folded
+  into ADR-0028.
+- **README / `docs/security.md`** must state: *the handshake is a custom,
+  unaudited protocol (SIGMA-style, not TLS or Noise); the primitives are
+  audited, the composition is not.*
+
+**Sign-off needed before any code:** confirm this amended design, then
+implementation proceeds in the seven commits above.

@@ -74,6 +74,16 @@ class NoSessionError(SessionStoreError):
     """No usable session exists for a peer, so a new handshake is required."""
 
 
+class SessionIdCollisionError(SessionStoreError):
+    """A ``session_id`` is already recorded.
+
+    ``session_id`` is unique by construction; re-recording one would reset the
+    existing session's anti-replay window and send counter, which is exactly
+    what a replayed handshake would want. The store refuses rather than
+    replaces.
+    """
+
+
 @dataclass(slots=True)
 class PeerSession:
     """One negotiated session with one peer.
@@ -187,35 +197,28 @@ class SessionStore:
     # --- recording ---------------------------------------------------------
 
     def put(self, session: PeerSession) -> None:
-        """Record a negotiated session, evicting only what policy allows.
+        """Record a negotiated session.
 
-        Re-recording the same ``session_id`` is an idempotent replace. A new
-        session never replaces a *different* existing session for the same peer:
-        at most it triggers eviction of the oldest unconfirmed session, and only
-        once the per-peer or global cap is reached.
+        A ``session_id`` is unique: re-recording one is a collision, not an
+        update. Replacing a live session would reset its anti-replay window and
+        send counter, which is exactly what a replayed handshake would want.
 
         Args:
             session: The session to record.
 
         Raises:
             SessionStoreError: If ``session.session_id`` is the wrong length.
+            SessionIdCollisionError: If ``session.session_id`` is already
+                recorded.
         """
         if len(session.session_id) != SESSION_ID_SIZE:
             raise SessionStoreError(
                 f"session_id must be {SESSION_ID_SIZE} bytes, got {len(session.session_id)}"
             )
         if session.session_id in self._by_session_id:
-            existing = self._by_session_id[session.session_id]
-            if existing.confirmed:
-                # A *replayed* hello re-derives exactly the same session_id
-                # (same ephemeral keys, same salt). Replacing the confirmed
-                # session would reset its anti-replay window and its send
-                # counter, which is precisely what an attacker replaying a
-                # captured hello would want. Keep the live session untouched.
-                return
-            self._by_session_id[session.session_id] = session
-            self._index_peer(session.peer_id, session.session_id)
-            return
+            raise SessionIdCollisionError(
+                f"session_id {session.session_id.hex()} is already recorded"
+            )
 
         self.prune_expired()
         self._enforce_peer_caps(session.peer_id)

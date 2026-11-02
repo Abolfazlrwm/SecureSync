@@ -1,14 +1,46 @@
-﻿* text=auto eol=lf
-*.py text eol=lf
-*.md text eol=lf
-*.txt text eol=lf
-*.yaml text eol=lf
-*.yml text eol=lf
+* text=auto eol=lf
+
+# Source code
+*.py   text eol=lf
+*.md   text eol=lf
+*.txt  text eol=lf
 *.toml text eol=lf
-*.json text eol=lf
-*.cfg text eol=lf
-*.ini text eol=lf
-*.png binary
-*.jpg binary
-*.zip binary
-*.db binary
+*.cfg  text eol=lf
+*.ini  text eol=lf
+
+# Config / CI
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.json  text eol=lf
+Dockerfile  text eol=lf
+Makefile    text eol=lf
+LICENSE     text eol=lf
+.editorconfig  text eol=lf
+.gitignore     text eol=lf
+.gitattributes text eol=lf
+.dockerignore  text eol=lf
+CODEOWNERS     text eol=lf
+
+# SVG (text, not binary)
+*.svg  text eol=lf
+
+# XML (text)
+*.xml  text eol=lf
+
+# Windows-only scripts (preserve CRLF for Windows tools)
+*.bat  text eol=crlf
+*.ps1  text eol=crlf
+*.cmd  text eol=crlf
+
+# Binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.zip  binary
+*.gz   binary
+*.tar  binary
+*.db   binary
+*.sqlite binary
+*.pyc  binary

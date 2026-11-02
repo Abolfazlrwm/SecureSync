@@ -179,9 +179,7 @@ def main() -> None:
         + best["HMAC-SHA256 (64 B)"]
     )
     initiator_best = (
-        best["Ed25519 verify"]
-        + best["HKDF-SHA256 (32 B)"]
-        + best["HMAC-SHA256 (64 B)"]
+        best["Ed25519 verify"] + best["HKDF-SHA256 (32 B)"] + best["HMAC-SHA256 (64 B)"]
     )
     responder_median = sum(best[x] for x in ("X25519 keygen", "X25519 ECDH", "Ed25519 sign")) + (
         2 * best["HKDF-SHA256 (32 B)"] + best["HMAC-SHA256 (64 B)"]
@@ -206,8 +204,10 @@ def main() -> None:
         + p95["HMAC-SHA256 (64 B)"]
     )
     print(f"\nResponder per message 1 (p95): {responder_p95:.1f} us")
-    print(f"  -> At {responder_p95:.0f} us/msg1, 200/s global cap costs "
-          f"{responder_p95 * 200 / 1000:.1f} ms/s")
+    print(
+        f"  -> At {responder_p95:.0f} us/msg1, 200/s global cap costs "
+        f"{responder_p95 * 200 / 1000:.1f} ms/s"
+    )
 
 
 if __name__ == "__main__":

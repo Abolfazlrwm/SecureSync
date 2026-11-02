@@ -133,10 +133,10 @@ Derived from the frozen `t_final` above, so the same handshake that produces the
 transcripts also produces this pairing code.
 
 ```text
-sas_material = H(T1 ‖ b"-sas" ‖ t_final)
-             = 9c25e36663b3addadb74e10491aeea0ef475fa310903ffbe3b6e0c0e2d8b6f92
-words (4)    = order-congress-sunset-shuffle     (44 bits)
-digits (8)   = 10984850                          (26.6 bits)
+sas_material = H(T1 ‖ lp("securesync-1e-sas") ‖ t_final)
+             = 95feeeba1ac50e59a588866018edfb1db13bb7ddcc78c9267d002fbf793ef348
+words (4)    = nominee-wash-purse-culture     (44 bits)
+digits (8)   = 12995144                          (26.6 bits)
 ```
 
 `words` is the default rendering; `digits` is the explicit alternative. Both are

@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hmac
 import os
 import struct
 from collections.abc import Callable
@@ -77,6 +78,8 @@ from securesync.infrastructure.networking.handshake_messages import (
     STATUS_ACCEPT,
     STATUS_REJECT,
     ConfirmMessage,
+    FinalMessage,
+    HandshakeMessageError,
     HelloMessage,
     ReplyMessage,
     check_not_self,
@@ -139,7 +142,23 @@ class HandshakeDeadlineError(HandshakeError):
 
 
 class HandshakeRejectedError(HandshakeError):
-    """The responder rejected the handshake in message 4."""
+    """The responder rejected the handshake, and proved it did.
+
+    Raised only when message 4 carries ``status = reject`` **and** a ``mac_f``
+    that verifies under ``k_r`` over the reject transcript. That is the only
+    kind of rejection a caller may count against a peer: it proves the holder
+    of the responder's ephemeral key produced it.
+    """
+
+
+class HandshakeRejectionUnverifiedError(HandshakeError):
+    """Message 4 says reject, but the rejection cannot be authenticated.
+
+    Either ``mac_f`` does not verify, or message 4 could not be parsed at all.
+    Anyone who can write to the connection can produce this, so it must never
+    be counted as a failed attempt against the peer (see design §7.3): an
+    attacker could otherwise lock a user out with forged rejections.
+    """
 
 
 class HandshakeStateError(HandshakeError):
@@ -315,12 +334,21 @@ class _InitiatorExchange(_Exchange):
         sig_i = owner.identity_provider.sign(owner.own_identity.private_key, signed_initiator(t2s))
         t3s = transcript_t3s(t3, sig_i)
         mac_i = confirmation_mac(secrets.initiator_confirmation_key, t3s)
-        await self._write(encode_confirm(sig_i=sig_i, mac_i=mac_i))
+        confirm_bytes = encode_confirm(sig_i=sig_i, mac_i=mac_i)
+        await self._write(confirm_bytes)
         self.state = HandshakeState.SENT_CONFIRM
 
         # SENT_CONFIRM -> CONFIRMED
-        final = decode_final(await self._read())
+        try:
+            final = decode_final(await self._read())
+        except HandshakeMessageError as exc:
+            # A FINAL we cannot parse cannot be authenticated either.
+            raise HandshakeRejectionUnverifiedError(
+                "message 4 is malformed, so its outcome cannot be authenticated"
+            ) from exc
+
         if final.status != STATUS_ACCEPT:
+            _require_authenticated_reject(final, t2s, confirm_bytes, secrets)
             raise HandshakeRejectedError(f"{reply.device_id!r} rejected the handshake")
 
         t_final = transcript_final(t3s, mac_i)
@@ -530,6 +558,36 @@ class _ResponderExchange(_Exchange):
                 secrets.responder_confirmation_key, transcript_m4_reject(t2s, m3_raw)
             )
             await self._write(encode_final(status=STATUS_REJECT, mac_f=mac_f))
+
+
+def _require_authenticated_reject(
+    final: FinalMessage,
+    t2s: bytes,
+    confirm_bytes: bytes,
+    secrets: HandshakeSecrets,
+) -> None:
+    """Check the ``mac_f`` of a reject, or refuse to call it a rejection.
+
+    The responder authenticates its refusal over ``t2s`` and the message-3 bytes
+    it actually received. Recomputing that here means a forged or tampered
+    reject is distinguishable from a real one.
+
+    Args:
+        final: The decoded message 4, with ``status = reject``.
+        t2s: The transcript hash after ``sig_r``.
+        confirm_bytes: The exact message 3 this side sent.
+        secrets: The derived secrets, for ``k_r``.
+
+    Raises:
+        HandshakeRejectionUnverifiedError: If the MAC does not verify.
+    """
+    expected = confirmation_mac(
+        secrets.responder_confirmation_key, transcript_m4_reject(t2s, confirm_bytes)
+    )
+    if not hmac.compare_digest(expected, final.mac_f):
+        raise HandshakeRejectionUnverifiedError(
+            "message 4 rejects the handshake but its mac does not verify"
+        )
 
 
 class HandshakeV3:

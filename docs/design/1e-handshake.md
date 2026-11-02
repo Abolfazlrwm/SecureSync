@@ -228,10 +228,22 @@ responder's explicit commitment: the initiator treats the session as **usable
 only after verifying `mac_f`** with `status = accept`.
 
 For a well-formed but invalid message 3 (bad `sig_i`/`mac_i`/pin), the responder
-sends `status = reject` with `t4_reject`; the initiator fails regardless of
-whether it can verify that MAC. For a malformed message 3, the responder sends a
-reject using the raw bytes it received; the initiator treats a non-verifying
-reject as a failure.
+sends `status = reject` with `mac_f` over `t4_reject`; for a malformed message 3,
+the responder computes the reject MAC over the raw bytes it received.
+
+The initiator **always verifies the reject MAC** before treating the rejection as
+authentic:
+
+* **`HandshakeRejectedError`** — `mac_f` verifies under `k_r` over
+  `transcript_m4_reject(t2s, m3_bytes)`. Only this rejection may be counted
+  against the peer (failed-SAS counters, per-peer rate limits, 1f
+  anti-replay counters), because it proves the holder of the responder's
+  ephemeral key produced it.
+* **`HandshakeRejectionUnverifiedError`** — `mac_f` does not verify, or
+  message 4 is malformed and cannot be parsed at all. Anyone who can write to
+  the connection can produce this, so it **must never** be counted as a failed
+  attempt against the peer; an attacker could otherwise lock a user out with
+  forged rejections.
 
 ### 4.6 Transcript and what is signed / MACed
 
@@ -408,7 +420,7 @@ X25519 keypair, one ECDH, one Ed25519 signature and a few HKDF calls.
 |---|---|---|---|
 | `IDLE` | — | `initiate()` | build `m1`, send, `SENT_HELLO` |
 | `SENT_HELLO` | `m1` sent | `m2` received | version check, parse, `t2`, verify `sig_r` (responder label + TOFU check, **no pin yet**), derive keys, verify `mac_r` (`compare_digest`), send `m3`, `SENT_CONFIRM` |
-| `SENT_CONFIRM` | `m3` sent | `m4` received | version/type check, `status = accept` ⇒ verify `mac_f`, **pin**, `CONFIRMED`; `status = reject` ⇒ `FAILED` |
+| `SENT_CONFIRM` | `m3` sent | `m4` received | version/type check; `status = accept` ⇒ verify `mac_f` (`compare_digest`), **pin**, `CONFIRMED`; `status = reject` ⇒ verify reject `mac_f`, `HandshakeRejectedError` if verified else `HandshakeRejectionUnverifiedError`, `FAILED`; malformed `m4` ⇒ `HandshakeRejectionUnverifiedError`, `FAILED` |
 | any wait state | — | deadline / parse error / bad version / bad signature / TOFU mismatch / bad MAC / low-order point / self-connection | `FAILED` |
 | `CONFIRMED` | `m4` verified | application data | send under `i2r_key` |
 | any | — | close | `CLOSED` |

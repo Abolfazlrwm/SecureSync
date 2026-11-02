@@ -71,11 +71,17 @@ class ScriptedResponder:
     #: Private key used to sign ``sig_r``, when it should differ from ours.
     signing_private_key: bytes | None = None
     reject: bool = False
+    #: Send REJECT with a random ``mac_f`` that cannot verify.
+    reject_forged_mac: bool = False
+    #: Send REJECT with ``mac_f`` computed over tampered m3 bytes.
+    reject_wrong_m3: bool = False
     tamper_sig_r: bool = False
     tamper_mac_r: bool = False
     tamper_mac_f: bool = False
     #: Send this instead of message 2.
     m2_override: bytes | None = None
+    #: Send this instead of message 4 (e.g. truncated garbage).
+    m4_override: bytes | None = None
     #: Read message 1, then never answer.
     silent: bool = False
     #: Fixed responder ephemeral/nonce, for deterministic vectors.
@@ -236,12 +242,26 @@ class ScriptedResponder:
         expected_mac_i = confirmation_mac(self.secrets.initiator_confirmation_key, t3s)
         self.mac_i_ok = expected_mac_i == self.confirm.mac_i
 
-        if self.reject:
-            mac_f = confirmation_mac(
-                self.secrets.responder_confirmation_key,
-                transcript_m4_reject(t2s, m3),
-            )
-            await self._write(writer, encode_final(status=STATUS_REJECT, mac_f=mac_f))
+        if self.reject or self.reject_forged_mac or self.reject_wrong_m3:
+            if self.reject_forged_mac:
+                # Random MAC that will never verify under k_r.
+                mac_f = b"\xDE\xAD" + b"\x00" * 30
+            elif self.reject_wrong_m3:
+                # Correct MAC but over different m3 bytes than what was sent.
+                tampered_m3 = bytes([m3[0] ^ 0xFF]) + m3[1:]
+                mac_f = confirmation_mac(
+                    self.secrets.responder_confirmation_key,
+                    transcript_m4_reject(t2s, tampered_m3),
+                )
+            else:
+                mac_f = confirmation_mac(
+                    self.secrets.responder_confirmation_key,
+                    transcript_m4_reject(t2s, m3),
+                )
+            if self.m4_override is not None:
+                await self._write(writer, self.m4_override)
+            else:
+                await self._write(writer, encode_final(status=STATUS_REJECT, mac_f=mac_f))
             return
 
         t_final = transcript_final(t3s, self.confirm.mac_i)
@@ -250,4 +270,7 @@ class ScriptedResponder:
         )
         if self.tamper_mac_f:
             mac_f = bytes([mac_f[0] ^ 0xFF]) + mac_f[1:]
-        await self._write(writer, encode_final(status=STATUS_ACCEPT, mac_f=mac_f))
+        if self.m4_override is not None:
+            await self._write(writer, self.m4_override)
+        else:
+            await self._write(writer, encode_final(status=STATUS_ACCEPT, mac_f=mac_f))

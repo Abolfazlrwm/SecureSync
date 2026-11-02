@@ -35,6 +35,7 @@ from securesync.infrastructure.networking.handshake_messages import (
 from securesync.infrastructure.networking.handshake_v3 import (
     HandshakeDeadlineError,
     HandshakeRejectedError,
+    HandshakeRejectionUnverifiedError,
     HandshakeStateError,
     HandshakeV3,
 )
@@ -424,6 +425,140 @@ class TestFailurePathsLeaveNoTrace:
                 ).initiate("127.0.0.1", peer.port)
 
         assert await trusted_peers.get_trusted_key(PEER_DEVICE_ID) is None
+
+
+class TestRejectMacAuthentication:
+    """Message 4 reject must be authenticated before it counts (design §7.3).
+
+    A reject is only trustworthy when its ``mac_f`` verifies under ``k_r`` over
+    ``transcript_m4_reject(t2s, m3_bytes)``.  Without that check an on-path
+    attacker could forge a reject and lock the user out.  The initiator must
+    therefore distinguish:
+
+    * ``HandshakeRejectedError`` — the responder proved it rejected.
+    * ``HandshakeRejectionUnverifiedError`` — anyone could have sent this.
+
+    Only the former may be counted by failed-SAS or rate-limiting logic.
+    """
+
+    async def test_a_genuine_reject_is_authenticated(
+        self,
+        identity_provider: Ed25519IdentityProvider,
+        own_identity: IdentityKeyPair,
+        key_exchange: PycaKeyExchangeProvider,
+        trusted_peers: FakeTrustedPeerRepository,
+    ) -> None:
+        async with responder(
+            identity_provider=identity_provider,
+            key_exchange=key_exchange,
+            reject=True,
+        ) as peer:
+            with pytest.raises(HandshakeRejectedError):
+                await _initiator(
+                    own_identity=own_identity,
+                    identity_provider=identity_provider,
+                    key_exchange=key_exchange,
+                    trusted_peers=trusted_peers,
+                ).initiate("127.0.0.1", peer.port)
+            await peer.wait()
+
+        assert await trusted_peers.get_trusted_key(PEER_DEVICE_ID) is None
+
+    async def test_a_forged_reject_mac_is_unverified(
+        self,
+        identity_provider: Ed25519IdentityProvider,
+        own_identity: IdentityKeyPair,
+        key_exchange: PycaKeyExchangeProvider,
+        trusted_peers: FakeTrustedPeerRepository,
+    ) -> None:
+        async with responder(
+            identity_provider=identity_provider,
+            key_exchange=key_exchange,
+            reject_forged_mac=True,
+        ) as peer:
+            with pytest.raises(HandshakeRejectionUnverifiedError):
+                await _initiator(
+                    own_identity=own_identity,
+                    identity_provider=identity_provider,
+                    key_exchange=key_exchange,
+                    trusted_peers=trusted_peers,
+                ).initiate("127.0.0.1", peer.port)
+            await peer.wait()
+
+        assert await trusted_peers.get_trusted_key(PEER_DEVICE_ID) is None
+
+    async def test_a_reject_over_wrong_m3_is_unverified(
+        self,
+        identity_provider: Ed25519IdentityProvider,
+        own_identity: IdentityKeyPair,
+        key_exchange: PycaKeyExchangeProvider,
+        trusted_peers: FakeTrustedPeerRepository,
+    ) -> None:
+        # The MAC is real but computed over different m3 bytes than what we
+        # sent — a tampering on-path attacker who modified m3 in flight.
+        async with responder(
+            identity_provider=identity_provider,
+            key_exchange=key_exchange,
+            reject_wrong_m3=True,
+        ) as peer:
+            with pytest.raises(HandshakeRejectionUnverifiedError):
+                await _initiator(
+                    own_identity=own_identity,
+                    identity_provider=identity_provider,
+                    key_exchange=key_exchange,
+                    trusted_peers=trusted_peers,
+                ).initiate("127.0.0.1", peer.port)
+            await peer.wait()
+
+        assert await trusted_peers.get_trusted_key(PEER_DEVICE_ID) is None
+
+    async def test_a_malformed_message_4_is_unverified(
+        self,
+        identity_provider: Ed25519IdentityProvider,
+        own_identity: IdentityKeyPair,
+        key_exchange: PycaKeyExchangeProvider,
+        trusted_peers: FakeTrustedPeerRepository,
+    ) -> None:
+        async with responder(
+            identity_provider=identity_provider,
+            key_exchange=key_exchange,
+            m4_override=b"\x03\x05\x00",
+        ) as peer:
+            with pytest.raises(HandshakeRejectionUnverifiedError):
+                await _initiator(
+                    own_identity=own_identity,
+                    identity_provider=identity_provider,
+                    key_exchange=key_exchange,
+                    trusted_peers=trusted_peers,
+                ).initiate("127.0.0.1", peer.port)
+            await peer.wait()
+
+        assert await trusted_peers.get_trusted_key(PEER_DEVICE_ID) is None
+
+    async def test_the_pin_is_not_written_for_any_reject(
+        self,
+        identity_provider: Ed25519IdentityProvider,
+        own_identity: IdentityKeyPair,
+        key_exchange: PycaKeyExchangeProvider,
+        trusted_peers: FakeTrustedPeerRepository,
+    ) -> None:
+        # Whether authenticated or not, a reject never pins the peer.
+        for flag in ("reject", "reject_forged_mac", "reject_wrong_m3"):
+            async with responder(
+                identity_provider=identity_provider,
+                key_exchange=key_exchange,
+                **{flag: True},  # type: ignore[arg-type]
+            ) as peer:
+                with pytest.raises((HandshakeRejectedError, HandshakeRejectionUnverifiedError)):
+                    await _initiator(
+                        own_identity=own_identity,
+                        identity_provider=identity_provider,
+                        key_exchange=key_exchange,
+                        trusted_peers=trusted_peers,
+                    ).initiate("127.0.0.1", peer.port)
+                await peer.wait()
+
+            assert await trusted_peers.get_trusted_key(PEER_DEVICE_ID) is None
 
 
 class TestPeerInputValidation:

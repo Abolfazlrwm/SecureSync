@@ -1,8 +1,8 @@
 # 1e — Handshake redesign: transcript binding, freshness and key confirmation
 
-Status: **Amended design v2 — Option B approved with seven amendments integrated.
-Commits 1–4b may be implemented against this document; commit 5 (transport wiring
-and `CURRENT_VERSION` bump) waits for sign-off.**
+Status: **Approved design (Option B, seven amendments integrated). Commits 1–4b
+are implemented. Commit 5 (transport wiring and `CURRENT_VERSION` bump) is being
+prepared separately by another contributor; this document is frozen for 1e.**
 
 Decision recorded on 2026-10-31:
 
@@ -333,16 +333,14 @@ Every decoder validates before returning, and raises **only** typed errors
 - `lp()` values longer than 65535 bytes are rejected before encoding.
 - A peer whose `device_id` or Ed25519 public key equals our own is rejected
   (`HandshakeValidationError`) — self-connection / reflection.
-- X25519 public keys are checked against the **seven known low-order
-  points** (the libsodium blacklist — seven distinct x-coordinates,
-  since the eight algebraic points of order dividing 8 include one
-  x/−x pair that shares an x-coordinate on the Montgomery curve). This
+- X25519 public keys are checked against the **libsodium low-order
+  blacklist** — seven encodings (including the non-canonical encodings of the
+  same points). We reject those seven. This
   is **defence-in-depth**: the authoritative check is rejecting an
   all-zero shared secret (RFC 7748 §6.1), which catches all low-order
   and contributory-behaviour attacks regardless of whether the input
   is on the blacklist. The blacklist exists so the error is typed and
-  raised early, before ECDH, not because the all-zero check alone is
-  insufficient.
+  raised early, before ECDH.
 
 ### 4.11 No application data before confirmation
 
@@ -383,7 +381,7 @@ X25519 keypair, one ECDH, one Ed25519 signature and a few HKDF calls.
 cryptographic computation time is measured — parsing, I/O, and rate-limiter
 overhead are excluded; see `benchmarks/bench_handshake.py`):
 
-**Quiet-machine run** (no other CPU-bound processes):
+**Fastest run observed**:
 
 | Operation | Best | Median | p95 |
 |---|---|---|---|
@@ -414,13 +412,13 @@ not established. The earlier draft attributed the difference to
 same versions were used throughout.
 
 **Security assessment uses the WORST observed value** (~543 µs per
-message 1), not the quiet-machine p95, to be maximally conservative.
+message 1), not the fastest-run p95, to be maximally conservative.
 
 **Assessment: I agree with moving the signature to message 3, with conditions.**
 
 - Signing message 1 would **not** reduce the responder's cost: it still does
   the same keypair, ECDH and signature. It would only add one Ed25519 verify
-  (~144–336 µs quiet, up to ~360 µs under contention) before responding,
+  (~144–336 µs in the fastest run, up to ~360 µs under contention) before responding,
   while making message 1 replayable and revealing the initiator's identity to
   a passive observer.
 - At **543 µs (worst observed)** per message 1, the per-IP limit of 30/60 s
@@ -621,10 +619,11 @@ and is pushed before the next begins.
    allocation.
 5. **`feat(protocol)!: wire the v3 handshake and bump CURRENT_VERSION to 3`**
    `HandshakeResult`, `main.py`, the coordinator, `HandshakeServer`, integration
-   tests, v2 → `UnsupportedVersionError`. **Not started until sign-off.**
+   tests, v2 → `UnsupportedVersionError`. **Being prepared separately; not part
+   of this branch.**
 6. **`test(security): retire the hello-malleability xfails`**
    Remove the two strict `xfail` markers; add replay, MITM, confirmation and
-   downgrade tests.
+   downgrade tests. **Being prepared separately; not part of this branch.**
 7. **`docs: document the v3 handshake and the custom-protocol caveat`**
    `docs/protocol.md`, `docs/security.md`, `README.md`, the test vectors and the
    ADRs in §13.

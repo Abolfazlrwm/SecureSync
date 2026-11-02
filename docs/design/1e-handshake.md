@@ -333,10 +333,16 @@ Every decoder validates before returning, and raises **only** typed errors
 - `lp()` values longer than 65535 bytes are rejected before encoding.
 - A peer whose `device_id` or Ed25519 public key equals our own is rejected
   (`HandshakeValidationError`) — self-connection / reflection.
-- X25519 public keys are checked against the **eight known low-order points**
-  (the libsodium blacklist); the shared secret is also rejected if it is all
-  zeros. This closes the "contributory behaviour" hole where a malicious peer
-  forces a predictable secret.
+- X25519 public keys are checked against the **seven known low-order
+  points** (the libsodium blacklist — seven distinct x-coordinates,
+  since the eight algebraic points of order dividing 8 include one
+  x/−x pair that shares an x-coordinate on the Montgomery curve). This
+  is **defence-in-depth**: the authoritative check is rejecting an
+  all-zero shared secret (RFC 7748 §6.1), which catches all low-order
+  and contributory-behaviour attacks regardless of whether the input
+  is on the blacklist. The blacklist exists so the error is typed and
+  raised early, before ECDH, not because the all-zero check alone is
+  insufficient.
 
 ### 4.11 No application data before confirmation
 
@@ -372,10 +378,12 @@ Because message 1 is unsigned, the responder cannot verify the initiator before
 doing work. Per message 1 it does: rate-limit check (O(1)), parse (O(L)), one
 X25519 keypair, one ECDH, one Ed25519 signature and a few HKDF calls.
 
-**Measured on the development machine** (Python 3.13.5, Windows 11
-10.0.26300, `cryptography` 50.0.1, OpenSSL 4.0.2; 5 runs of 2 000
-iterations with a 100-iteration warm-up, best / median / p95 reported;
-see `benchmarks/bench_handshake.py`):
+**Measured** (Python 3.13, `cryptography` 50.0.1, OpenSSL 4.0.2; 5 runs of
+2 000 iterations with a 100-iteration warm-up per measurement; only
+cryptographic computation time is measured — parsing, I/O, and rate-limiter
+overhead are excluded; see `benchmarks/bench_handshake.py`):
+
+**Quiet-machine run** (no other CPU-bound processes):
 
 | Operation | Best | Median | p95 |
 |---|---|---|---|
@@ -388,21 +396,37 @@ see `benchmarks/bench_handshake.py`):
 | **Responder, per message 1** (keygen + ECDH + sign + 2 HKDF + HMAC) | **~140 µs** | **~142 µs** | **~185 µs** |
 | **Initiator, per message 2** (verify + HKDF + HMAC) | **~161 µs** | **~162 µs** | **~356 µs** |
 
-The earlier draft reported 123 µs for the responder; the difference is
-within the range explained by the `cryptography` / OpenSSL version
-available at measurement time (earlier runs used a different
-`cryptography` build). The security assessment below uses the **p95
-(worst) value**, not the best, to be conservative.
+**Spread across three additional runs on the same machine** (identical
+software versions; no deliberate load, but normal OS background activity):
+
+| Run | Responder best | Responder p95 |
+|---|---|---|
+| 1 | 234 µs | 293 µs |
+| 2 | 253 µs | 386 µs |
+| 3 | 296 µs | 405 µs |
+
+The 2–3× variation between runs on the same machine and same software
+versions shows that **CPU contention is the suspected but unproven cause**
+of the spread. The cause of the single worst observed measurement
+(**~543 µs** per message 1, recorded during development) is likewise
+not established. The earlier draft attributed the difference to
+`cryptography`/OpenSSL version changes; that claim was incorrect — the
+same versions were used throughout.
+
+**Security assessment uses the WORST observed value** (~543 µs per
+message 1), not the quiet-machine p95, to be maximally conservative.
 
 **Assessment: I agree with moving the signature to message 3, with conditions.**
 
 - Signing message 1 would **not** reduce the responder's cost: it still does
   the same keypair, ECDH and signature. It would only add one Ed25519 verify
-  (~144–336 µs) before responding, while making message 1 replayable and revealing
-  the initiator's identity to a passive observer.
-- At **185 µs (p95)** per message 1, the per-IP limit of 30/60 s costs the responder
-  at most **~5.6 ms per minute per IP**; a global cap of 200/s costs at most
-  **~37 ms per second** in total. That is negligible.
+  (~144–336 µs quiet, up to ~360 µs under contention) before responding,
+  while making message 1 replayable and revealing the initiator's identity to
+  a passive observer.
+- At **543 µs (worst observed)** per message 1, the per-IP limit of 30/60 s
+  costs the responder at most **~16.3 ms per minute per IP**; a global cap of
+  200/s costs at most **~109 ms per second** in total. That is well within
+  the budget of a single core.
 - The exposure is bounded by the existing per-source-IP limiter
   (`MAX_HANDSHAKES_PER_IP = 30` per 60 s), the existing
   `MAX_CONCURRENT_CONNECTIONS`, a **global handshakes-per-second cap**
@@ -565,7 +589,7 @@ would want.
 | Reflection | Direction labels + separate `k_r`/`k_i` + self-connection rejection |
 | Malleability | Any byte flip breaks a signature or MAC |
 | Downgrade | Version byte checked first and bound into the transcript |
-| Low-order / contributory | 8-point blacklist + all-zero shared-secret rejection |
+| Low-order / contributory | All-zero shared-secret rejection (RFC 7748, authoritative) + 7-point blacklist (defence-in-depth) |
 | Pin safety | Pin written only after the whole handshake; failures leave the store untouched |
 | Audit status | **Custom, unaudited protocol** (primitives audited; composition not) |
 

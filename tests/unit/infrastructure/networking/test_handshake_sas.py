@@ -23,9 +23,9 @@ from securesync.infrastructure.networking.sas_wordlist import SAS_WORDS
 
 #: Frozen ``t_final`` from the message-layer known-answer test.
 T_FINAL = bytes.fromhex("6a990fd748d5c02415175ce9623e92c7410d25630e1d0458f7f8573f56921fe3")
-EXPECTED_MATERIAL = "9c25e36663b3addadb74e10491aeea0ef475fa310903ffbe3b6e0c0e2d8b6f92"
-EXPECTED_WORDS = ("order", "congress", "sunset", "shuffle")
-EXPECTED_DIGITS = "10984850"
+EXPECTED_MATERIAL = "95feeeba1ac50e59a588866018edfb1db13bb7ddcc78c9267d002fbf793ef348"
+EXPECTED_WORDS = ("nominee", "wash", "purse", "culture")
+EXPECTED_DIGITS = "12995144"
 
 
 class TestWordlist:
@@ -146,7 +146,7 @@ class TestDigits:
 
 class TestFormatting:
     def test_known_answer(self) -> None:
-        assert format_sas(EXPECTED_WORDS) == "order-congress-sunset-shuffle"
+        assert format_sas(EXPECTED_WORDS) == "nominee-wash-purse-culture"
 
     def test_custom_separator(self) -> None:
         assert format_sas(("a", "b"), separator=" ") == "a b"

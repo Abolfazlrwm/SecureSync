@@ -7,7 +7,7 @@ nonces, both signatures and both confirmation MACs
 (``docs/design/1e-handshake.md`` §7.1):
 
 ```text
-sas_material = H(T1 ‖ b"-sas" ‖ t_final)
+sas_material = H(T1 ‖ lp("securesync-1e-sas") ‖ t_final)
 ```
 
 Rendering (design §7.2):
@@ -40,6 +40,7 @@ from securesync.core.protocol import ProtocolError
 from securesync.infrastructure.networking.handshake_keys import TRANSCRIPT_SIZE
 from securesync.infrastructure.networking.handshake_messages import T1
 from securesync.infrastructure.networking.sas_wordlist import SAS_WORDS
+from securesync.infrastructure.networking.session_keys import length_prefixed
 
 #: Number of words in the SAS wordlist. Fixed at 2048 so one word is 11 bits.
 WORDLIST_SIZE: Final = 2048
@@ -54,7 +55,10 @@ DIGIT_COUNT: Final = 8
 #: Maximum number of digits this module will render.
 MAX_DIGIT_COUNT: Final = 12
 
-_SAS_LABEL: Final = b"-sas"
+_SAS_LABEL: Final = b"securesync-1e-sas"
+#: Length-prefixed SAS label, matching the convention of every other
+#: domain-separation label in the handshake (§4.6).
+_LP_SAS_LABEL: Final = length_prefixed(_SAS_LABEL)
 
 
 class SasError(ProtocolError):
@@ -68,14 +72,14 @@ def sas_material(transcript_final: bytes) -> bytes:
         transcript_final: ``t_final`` from the v3 handshake.
 
     Returns:
-        ``H(T1 ‖ b"-sas" ‖ t_final)``.
+        ``H(T1 ‖ lp("securesync-1e-sas") ‖ t_final)``.
 
     Raises:
         SasError: If ``transcript_final`` is not a SHA-256 digest.
     """
     if len(transcript_final) != TRANSCRIPT_SIZE:
         raise SasError(f"t_final must be {TRANSCRIPT_SIZE} bytes, got {len(transcript_final)}")
-    return hashlib.sha256(T1 + _SAS_LABEL + transcript_final).digest()
+    return hashlib.sha256(T1 + _LP_SAS_LABEL + transcript_final).digest()
 
 
 def entropy_bits(count: int) -> int:

@@ -245,7 +245,7 @@ class ScriptedResponder:
         if self.reject or self.reject_forged_mac or self.reject_wrong_m3:
             if self.reject_forged_mac:
                 # Random MAC that will never verify under k_r.
-                mac_f = b"\xDE\xAD" + b"\x00" * 30
+                mac_f = b"\xde\xad" + b"\x00" * 30
             elif self.reject_wrong_m3:
                 # Correct MAC but over different m3 bytes than what was sent.
                 tampered_m3 = bytes([m3[0] ^ 0xFF]) + m3[1:]

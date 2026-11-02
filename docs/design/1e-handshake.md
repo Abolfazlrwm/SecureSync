@@ -373,32 +373,40 @@ doing work. Per message 1 it does: rate-limit check (O(1)), parse (O(L)), one
 X25519 keypair, one ECDH, one Ed25519 signature and a few HKDF calls.
 
 **Measured on the development machine** (Python 3.13.5, Windows 11
-10.0.26300, `cryptography` via miniconda, 20 000 iterations):
+10.0.26300, `cryptography` 50.0.1, OpenSSL 4.0.2; 5 runs of 2 000
+iterations with a 100-iteration warm-up, best / median / p95 reported;
+see `benchmarks/bench_handshake.py`):
 
-| Operation | Measured |
-|---|---|
-| X25519 keygen | 35.3 µs |
-| X25519 ECDH | 35.9 µs |
-| Ed25519 sign | 36.2 µs |
-| Ed25519 verify | 154.0 µs |
-| HKDF-SHA256 (32 B) | 13.7 µs |
-| HMAC-SHA256 (64 B) | 7.7 µs |
-| **Responder, per message 1** (keygen + ECDH + sign + 2 HKDF + HMAC) | **123.3 µs** |
-| **Initiator, per message 2** (verify + HKDF + HMAC) | **~175 µs** |
+| Operation | Best | Median | p95 |
+|---|---|---|---|
+| X25519 keygen | 37 µs | 39 µs | 54 µs |
+| X25519 ECDH | 38 µs | 42 µs | 58 µs |
+| Ed25519 sign | 36 µs | 38 µs | 41 µs |
+| Ed25519 verify | 144 µs | 216 µs | 336 µs |
+| HKDF-SHA256 (32 B) | 12 µs | 13 µs | 13 µs |
+| HMAC-SHA256 (64 B) | 6 µs | 6 µs | 6 µs |
+| **Responder, per message 1** (keygen + ECDH + sign + 2 HKDF + HMAC) | **~140 µs** | **~142 µs** | **~185 µs** |
+| **Initiator, per message 2** (verify + HKDF + HMAC) | **~161 µs** | **~162 µs** | **~356 µs** |
+
+The earlier draft reported 123 µs for the responder; the difference is
+within the range explained by the `cryptography` / OpenSSL version
+available at measurement time (earlier runs used a different
+`cryptography` build). The security assessment below uses the **p95
+(worst) value**, not the best, to be conservative.
 
 **Assessment: I agree with moving the signature to message 3, with conditions.**
 
 - Signing message 1 would **not** reduce the responder's cost: it still does
   the same keypair, ECDH and signature. It would only add one Ed25519 verify
-  (~154 µs) before responding, while making message 1 replayable and revealing
+  (~144–336 µs) before responding, while making message 1 replayable and revealing
   the initiator's identity to a passive observer.
-- At **123 µs** per message 1, the per-IP limit of 30/60 s costs the responder
-  at most **~3.7 ms per minute per IP**; a global cap of 200/s costs at most
-  **~25 ms per second** in total. That is negligible.
+- At **185 µs (p95)** per message 1, the per-IP limit of 30/60 s costs the responder
+  at most **~5.6 ms per minute per IP**; a global cap of 200/s costs at most
+  **~37 ms per second** in total. That is negligible.
 - The exposure is bounded by the existing per-source-IP limiter
   (`MAX_HANDSHAKES_PER_IP = 30` per 60 s), the existing
   `MAX_CONCURRENT_CONNECTIONS`, a **global handshakes-per-second cap**
-  (`MAX_GLOBAL_HANDSHAKES_PER_SECOND = 200`, burst 400), a **half-open cap**
+  (`MAX_HANDSHAKES_GLOBAL_PER_S = 200`, burst 400), a **half-open cap**
   (`MAX_HALF_OPEN = 64`) and **one absolute deadline for the whole handshake**
   (`HANDSHAKE_DEADLINE_S = 10.0`), not a per-read timeout.
 - The responder must **not allocate a `PeerSession`** until message 3 verifies.

@@ -467,7 +467,7 @@ commitment. On `FAILED` it discards the transient state and stores no session.
 ### 7.1 Derivation
 
 ```text
-sas_material = H(T1 ‖ b"-sas" ‖ t_final)
+sas_material = H(T1 ‖ lp("securesync-1e-sas") ‖ t_final)
 ```
 
 `t_final` binds both Ed25519 identities, both ephemerals, both nonces, both

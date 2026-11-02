@@ -9,6 +9,11 @@ applied at :class:`~securesync.infrastructure.networking.x25519_handshake.Handsh
 The limiter is keyed by the hello's **source IP** (the TCP peer address), not by
 the device ID inside the message: that field is unauthenticated at this point
 and would let an attacker dodge the limit by inventing new IDs.
+
+A per-IP limit alone is not enough once an attacker has many addresses, so
+:class:`GlobalHandshakeLimiter` adds a process-wide token bucket on top. It is
+deliberately coarser: it protects the machine, while the per-IP limit protects
+one peer's fair share.
 """
 
 from __future__ import annotations
@@ -92,3 +97,68 @@ class SourceIpRateLimiter:
         for ip in stale:
             del self._attempts[ip]
         return len(stale)
+
+
+#: Process-wide handshake admission rate, in handshakes per second.
+MAX_HANDSHAKES_GLOBAL_PER_S: Final = 200.0
+#: How many handshakes may be admitted back-to-back after an idle period.
+GLOBAL_HANDSHAKE_BURST: Final = 400.0
+
+
+class GlobalHandshakeLimiter:
+    """A token bucket capping handshakes per second across the whole process.
+
+    A sliding window would either allow a burst equal to the window size or
+    none at all; a token bucket admits a burst after idle time and then settles
+    at the sustained rate, which is what "200/s with a burst of 400" means.
+    """
+
+    def __init__(
+        self,
+        rate_per_s: float = MAX_HANDSHAKES_GLOBAL_PER_S,
+        burst: float = GLOBAL_HANDSHAKE_BURST,
+        now: Callable[[], float] = time.monotonic,
+    ) -> None:
+        """Initialize the bucket full.
+
+        Args:
+            rate_per_s: Sustained admission rate.
+            burst: Bucket capacity, i.e. the largest instantaneous burst.
+            now: Monotonic clock, injectable for tests.
+
+        Raises:
+            ValueError: If ``rate_per_s`` or ``burst`` is not positive.
+        """
+        if rate_per_s <= 0:
+            raise ValueError("rate_per_s must be positive")
+        if burst <= 0:
+            raise ValueError("burst must be positive")
+        self._rate = rate_per_s
+        self._burst = burst
+        self._now = now
+        self._tokens = burst
+        self._last = now()
+
+    @property
+    def tokens(self) -> float:
+        """Tokens currently available, after refilling."""
+        self._refill()
+        return self._tokens
+
+    def _refill(self) -> None:
+        now = self._now()
+        elapsed = max(0.0, now - self._last)
+        self._last = now
+        self._tokens = min(self._burst, self._tokens + elapsed * self._rate)
+
+    def allow(self) -> bool:
+        """Consume one token and report whether the handshake is admitted.
+
+        Returns:
+            ``True`` if a token was available, ``False`` if the bucket is empty.
+        """
+        self._refill()
+        if self._tokens < 1.0:
+            return False
+        self._tokens -= 1.0
+        return True

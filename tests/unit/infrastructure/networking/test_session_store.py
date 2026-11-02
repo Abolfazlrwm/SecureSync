@@ -11,6 +11,7 @@ from securesync.infrastructure.networking.replay_protection import (
 from securesync.infrastructure.networking.session_store import (
     CounterExhaustedError,
     PeerSession,
+    SessionIdCollisionError,
     SessionStore,
     SessionStoreError,
 )
@@ -71,20 +72,21 @@ class TestKeyingAndLookup:
         assert len(store) == 2
         assert {s.session_id for s in store.sessions_for_peer("p")} == {_sid(1), _sid(2)}
 
-    def test_put_same_session_id_is_idempotent(self) -> None:
+    def test_put_same_session_id_is_a_collision(self) -> None:
         store = _store()
         store.put(_session("p", _sid(1)))
-        store.put(_session("p", _sid(1), confirmed=True))
+        with pytest.raises(SessionIdCollisionError):
+            store.put(_session("p", _sid(1), confirmed=True))
         assert len(store) == 1
-        assert store.get_by_session_id(_sid(1)).confirmed is True  # type: ignore[union-attr]
 
-    def test_unconfirmed_put_cannot_downgrade_a_confirmed_session(self) -> None:
+    def test_collision_cannot_downgrade_a_confirmed_session(self) -> None:
         store = _store()
         store.put(_session("p", _sid(1), confirmed=True))
         store.get_by_session_id(_sid(1)).receive_window.accept(7)  # type: ignore[union-attr]
 
         # A replayed hello re-derives the same session_id as unconfirmed.
-        store.put(_session("p", _sid(1), confirmed=False))
+        with pytest.raises(SessionIdCollisionError):
+            store.put(_session("p", _sid(1), confirmed=False))
 
         live = store.get_by_session_id(_sid(1))
         assert live is not None

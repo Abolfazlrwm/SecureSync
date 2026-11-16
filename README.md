@@ -22,7 +22,7 @@
 > which runs two real instances over real TCP and confirms a file
 > created on one device is reconstructed correctly on the other, with
 > no manual intervention. See [ROADMAP.md](ROADMAP.md) for the full
-> implementation history and [docs/adr/](docs/adr/) for 26 ADRs
+> implementation history and [docs/adr/](docs/adr/) for 27 ADRs
 > documenting every real bug found and fixed along the way.
 
 ---

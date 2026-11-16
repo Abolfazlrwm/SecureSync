@@ -57,7 +57,7 @@ central server holds your data.
 This isn't a toy that only passes its own tests — it's been pressure-tested
 against reality at every layer:
 
-- **576 tests, 94% line coverage** (measured in CI and published to Codecov),
+- **734 tests, 94% line coverage** (measured in CI and published to Codecov),
   including a real end-to-end test
   ([tests/integration/test_end_to_end_sync.py](tests/integration/test_end_to_end_sync.py))
   that runs two independent instances over real TCP with real crypto and

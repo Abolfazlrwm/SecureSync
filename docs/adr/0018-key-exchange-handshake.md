@@ -1,7 +1,7 @@
 # ADR 0018: A Real X25519 Key-Exchange Handshake
 
 **Status:** Accepted
-**Date:** Post-ADR-0017 follow-up
+**Date:** 2026-08-16
 
 ## Context
 
@@ -9,7 +9,7 @@ ADR-0017 named the exact remaining prerequisite for wiring
 `TcpTransferTransport` into a real deployment: nothing in this
 codebase established the per-session key it needs.
 `PycaSessionKeyProvider.derive_session_keys`'s own docstring (added
-during the Phase 4-10 audit) flagged the underlying reason a naive
+during the docstring audit) flagged the underlying reason a naive
 caller would get this wrong: two peers computing from the same shared
 secret and salt get the *identical* `(key_1, key_2)` pair back — with
 no role convention, both sides would try to encrypt with the same key
@@ -28,8 +28,8 @@ the identical `(key_1, key_2)`.
 
 **The ambiguity is resolved by a fixed role convention:** the
 initiator returns `(send=key_1, receive=key_2)`; the responder returns
-the swapped `(send=key_2, receive=key_1)`. Verified in this session
-over a real socket, not just reasoned about:
+the swapped `(send=key_2, receive=key_1)`. Verified over a real
+socket, not just reasoned about:
 `initiator_result.send_key == responder_result.receive_key` and
 `initiator_result.receive_key == responder_result.send_key` both hold,
 and the two keys are confirmed distinct (real directional separation,
@@ -39,9 +39,10 @@ not one key reused both ways).
 refactored** to take `send_key`/`receive_key` separately instead of
 one shared `key` — matching what a real handshake actually produces.
 This is a breaking change to code added in this same integration
-effort (ADR-0016/0017), not to any previously-stabilized phase, so it
-was made directly rather than deprecated alongside the old signature.
-Verified end-to-end in this session: a real handshake's
+effort (ADR-0016/0017), not to any interface that had already been
+stabilized across a release, so it was made directly rather than
+deprecated alongside the old signature.
+Verified end to end: a real handshake's
 `HandshakeResult` was fed directly into two `TcpTransferTransport`
 instances (no hardcoded key anywhere), and a chunk was uploaded and
 downloaded correctly through the unmodified application use cases —
@@ -95,12 +96,12 @@ but a single shared key for both directions is exactly the
 would mean the handshake produces a correct directional pair that the
 transports then can't actually use directionally. Fixing the
 transports' constructors now, while they're both still recent,
-unreleased Phase 11 code, is cheaper than fixing it later.
+unreleased transport code, is cheaper than fixing it later.
 
 ## Rejected: add peer authentication in this same change
 
 Verifying a peer's long-term identity needs a persistent store this
-project doesn't have (Phase 8's `SqliteMetadataRepository` covers file
+project doesn't have (`SqliteMetadataRepository` covers file
 manifests, not peer identities) and a policy decision (trust-on-first-use?
 a pre-shared known-peers list?) that deserves its own deliberate ADR
 rather than being folded in here.

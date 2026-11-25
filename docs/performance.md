@@ -1,6 +1,7 @@
 # Performance
 
-> Status: **Benchmarks implemented (Phases 2-10)** — This document reflects the performance targets and measured results for SecureSync.
+> Status: **Current** — targets below; measured results and the harness
+> live in `benchmarks/`.
 
 ## 1. Performance Targets
 

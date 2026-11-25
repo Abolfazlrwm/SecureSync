@@ -1,9 +1,8 @@
 # Troubleshooting
 
 > Status: **Living document** — this page grows as real issues surface
-> during development and from user reports; no runtime behavior exists yet
-> to troubleshoot (Phase 0/0.5). It exists now (with a fixed structure) so
-> every future troubleshooting entry is added consistently instead of ad hoc.
+> during development and from user reports. The fixed structure keeps
+> entries consistent.
 
 ## How to file an entry here
 
@@ -31,8 +30,7 @@ Each entry follows this shape:
 
 ## Known issues
 
-*(None yet — this is a Phase 0 scaffold. Populated starting with the first
-real implementation phase.)*
+*(None yet.)*
 
 ## Getting more help
 

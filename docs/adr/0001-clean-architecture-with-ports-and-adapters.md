@@ -1,7 +1,7 @@
 # ADR 0001: Clean Architecture with Ports and Adapters
 
 **Status:** Accepted
-**Date:** Phase 0
+**Date:** 2026-07-25
 
 ## Context
 

@@ -1,7 +1,7 @@
 # ADR 0019: Peer Authentication and Trust-on-First-Use
 
 **Status:** Accepted
-**Date:** Post-ADR-0018 follow-up
+**Date:** 2026-08-15
 
 ## Context
 
@@ -39,7 +39,7 @@ JSON-file, atomically-written adapter). The *first* handshake with a
 given `device_id` pins its presented identity public key; every
 subsequent handshake claiming that `device_id` must present the same
 key, or `PeerIdentityMismatchError` is raised and the handshake is
-refused. Verified end to end in this session: a genuine repeat
+refused. Verified end to end: a genuine repeat
 handshake with the same on-disk identity succeeds; a second party
 claiming the *same* `device_id` with a *different* identity is
 rejected — the responder's `HandshakeServer` publishes no result for
@@ -52,7 +52,7 @@ it, and the connection is dropped before completing.
 - Real protection against a straightforward impersonation attempt:
   claiming someone else's `device_id` without their private key no
   longer works, verified with an actual mismatched-identity handshake
-  attempt in this session.
+  attempt.
 - Key rotation is at least *detectable*: if a genuinely-trusted peer's
   identity key ever changes (new install, lost key, or an attack), the
   next handshake fails loudly instead of silently accepting a new key.

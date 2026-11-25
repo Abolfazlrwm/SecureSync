@@ -1,11 +1,11 @@
 # ADR 0013: SQLite for Metadata Persistence
 
 **Status:** Accepted
-**Date:** 2026-07-30
+**Date:** 2026-08-07
 
 ## Context
 
-Phase 8 requires replacing the temporary JSON-based persistence with a production-grade backend. We need to store file metadata, chunk mappings, peer information, and version history.
+The metadata layer requires replacing the temporary JSON-based persistence with a production-grade backend. We need to store file metadata, chunk mappings, peer information, and version history.
 
 ## Decision
 

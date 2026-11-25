@@ -1,12 +1,12 @@
 # ADR 0007: Chunking Strategy as a Pluggable Port (Strategy Pattern)
 
 **Status:** Accepted
-**Date:** Phase 2
+**Date:** 2026-07-26
 
 ## Context
 
-`ROADMAP.md`'s original Phase 2 entry listed "rolling hash" alongside
-SHA-256 as a Phase 2 deliverable. The actual Phase 2 scope, confirmed
+The original chunk-engine plan listed "rolling hash" alongside
+SHA-256 as deliverables. The actual scope, confirmed
 before implementation began, is narrower: fixed-size chunking only,
 with content-defined chunking (rolling hash / Rabin fingerprint /
 FastCDC) explicitly deferred. That narrowing needs to be reflected in
@@ -25,7 +25,7 @@ express both kinds of algorithm without changing shape.
 
 Introduce `ChunkingStrategy` (`domain/chunking.py`) as an abstract port
 implementing the Strategy pattern, with exactly one concrete
-implementation shipped in Phase 2: `FixedSizeChunkingStrategy`
+implementation shipped with the chunk engine: `FixedSizeChunkingStrategy`
 (`infrastructure/chunking/streaming_chunk_reader.py`).
 
 The port is pull-based rather than size-based:
@@ -61,7 +61,7 @@ future strategy to implement it.
   `CalculateChunkHashesUseCase`, or any domain type.
 - `StreamingChunkReader` stays free of any `isinstance` check against a
   concrete strategy type; it only ever calls the port's two members.
-- Fixed-size chunking (the only algorithm Phase 2 ships) pays no
+- Fixed-size chunking (the only algorithm shipped) pays no
   runtime cost for this generality beyond one extra method call per
   read iteration — the pull-based loop is exactly how a real
   content-defined algorithm has to be structured anyway, so nothing
@@ -74,12 +74,11 @@ future strategy to implement it.
   a hypothetical `chunk_size_for(remaining_bytes: int) -> int` would
   have been for the fixed-size case alone — but that simpler shape
   cannot express content-defined chunking at all, so it would have
-  been a false economy: Phase 3's rolling-hash work would have had to
+  been a false economy: a later rolling-hash strategy would have had to
   replace the port anyway.
-- `ROADMAP.md` and `docs/architecture.md` needed updating to state
-  explicitly that rolling-hash chunking is reserved, not implemented,
-  behind this port — done as part of this phase's documentation
-  updates.
+- `docs/architecture.md` needed updating to state explicitly that
+  rolling-hash chunking is reserved, not implemented, behind this
+  port — done as part of this ADR's documentation updates.
 
 ## Rejected: size-only `ChunkingStrategy` (`chunk_size_for(remaining_bytes) -> int`)
 
@@ -88,14 +87,14 @@ but structurally incapable of expressing content-defined chunking,
 which must inspect actual byte content to choose a cut point. Adopting
 it now would have meant a breaking port change in whichever future
 phase implements rolling-hash chunking — precisely the kind of
-API instability Phase 2's architecture regression review was asked to
+API instability the chunk-engine architecture review was asked to
 catch.
 
 ## Rejected: implementing `RollingHashChunkingStrategy` now, unused
 
-Phase 2's explicit scope is "chunk engine + SHA-256 hash engine";
-shipping an unused content-defined implementation would be
-under-scoped work with no caller and no tests exercising it for real,
-against the phase's own "do not implement future phases" instruction.
+The chunk engine's explicit scope is fixed-size chunking plus
+SHA-256 hashing; shipping an unused content-defined implementation
+would be speculative work with no caller and no tests exercising it
+for real.
 The port is designed to make adding it later cheap; adding it now
 would not be cheaper, only earlier.

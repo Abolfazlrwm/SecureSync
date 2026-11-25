@@ -1,13 +1,13 @@
 # ADR 0020: Multi-Peer Session Keys and Full `main.py` Wiring
 
 **Status:** Accepted
-**Date:** Post-ADR-0019 follow-up
+**Date:** 2026-08-15
 
 ## Context
 
 ADR-0017 and ADR-0019 left two things explicitly open: `main.py` still
 didn't call `TcpTransferTransport`, `X25519Handshake`, or any of the
-Phase 12 crypto work, and `TcpTransferTransport` itself was
+handshake crypto work, and `TcpTransferTransport` itself was
 constructed with one fixed `(send_key, receive_key)` pair — correct
 for talking to exactly one peer, wrong for a device that syncs with
 several. A real device needs each peer's *own* negotiated keys, not
@@ -31,7 +31,7 @@ responder's signed messages; `HandshakeResult` carries the peer's
 `peer_transfer_port`. This was chosen over a fixed offset (e.g.
 "transfer port = discovery port + 1") because it needs no convention
 to keep in sync across files and correctly supports a future
-deployment where ports aren't sequential. Verified in this session: a
+deployment where ports aren't sequential. Verified: a
 handshake between two instances on arbitrary, non-adjacent ports
 correctly taught each side the other's real transfer port, and the
 resulting `TcpTransferTransport.send_chunk` connected to that
@@ -47,15 +47,14 @@ handshake is now genuinely wired in.
 `ensure_session(peer)` is idempotent (does nothing if a session
 already exists) and initiates a handshake otherwise.
 `SyncOrchestrator.handle_peer_discovered` calls it — wrapped in a
-`try/except` so one peer's failed handshake (verified in this session:
-a simulated `OSError` from `session_coordinator.ensure_session`) is
+`try/except` so one peer's failed handshake (verified with a
+simulated `OSError` from `session_coordinator.ensure_session`) is
 logged and counted in `stats.errors_encountered` without crashing
 discovery of any other peer.
 
-**`main.py` is now fully wired**, verified in this session by actually
-running `bootstrap()` (with `zeroconf`/`aiosqlite` stood in for, since
-neither is installed in this sandbox — a real environment limitation,
-not a code gap) through the point where `orchestrator.start()`
+**`main.py` is now fully wired**, verified by actually
+running `bootstrap()` (with minimal stand-ins for the `zeroconf`/
+`aiosqlite` adapters) through the point where `orchestrator.start()`
 successfully starts real discovery, a real `HandshakeServer` bound to
 a real port, and a real `TcpTransferTransport` bound to a real port,
 with `download_use_case`/`upload_use_case` no longer `None`. Also
@@ -99,10 +98,10 @@ now listens on.
   testing/demonstration tool, not part of the production transfer
   path `main.py` uses, so the inconsistency was accepted rather than
   spending effort making a test-only component multi-peer-capable.
-- `main.py`'s wiring couldn't be verified against the *real*
-  `zeroconf`/`aiosqlite` packages in this session's sandbox (neither
-  is installed, and there's no network access to install them) —
-  verification used minimal stand-ins that match the exact method
+- `main.py`'s wiring hasn't been verified against the *real*
+  `zeroconf`/`aiosqlite` libraries yet (they were not installed in
+  the environment this ADR was verified in) — verification used
+  minimal stand-ins that match the exact method
   signatures these two adapters call, which confirms the *wiring* is
   structurally correct, but real behavior against the actual
   third-party libraries should still be confirmed in an environment
@@ -131,7 +130,7 @@ merges two genuinely separate concerns — moving encrypted bytes, and
 negotiating the keys to encrypt them with — into one class, making
 each harder to test in isolation. Keeping `SessionCoordinator` and
 `TcpTransferTransport` separate, sharing only the `SessionKeyStore`,
-is what let both be verified independently in this session (the
+is what let both be verified independently (the
 transport with fixed test keys in ADR-0017/0018, the handshake and
 its authentication in isolation in ADR-0019) before verifying them
 together here.

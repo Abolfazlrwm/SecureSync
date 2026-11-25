@@ -4,12 +4,13 @@ This directory holds SecureSync's benchmark suite. See
 [`docs/performance.md`](../docs/performance.md) for the full methodology —
 what's measured, how, and why.
 
-**Status:** populated, starting Phase 2 (Chunk Engine) — `bench_hashing.py`
-and `bench_chunking.py`. One `bench_<module>.py` is added per phase, as
-that module lands. See `CHANGELOG.md` ("Benchmark results", Phase 2 entry)
-for the latest committed results.
+**Status:** populated. `bench_hashing.py` and `bench_chunking.py` cover
+the chunk engine; `bench_handshake.py` and `networking_benchmarks.py`
+cover the handshake and transfer paths. A few committed result files
+(`results_*.txt`) are kept for reference; they are snapshots from one
+machine and should not be read as guarantees.
 
-## Running (once populated)
+## Running
 
 ```bash
 make benchmark

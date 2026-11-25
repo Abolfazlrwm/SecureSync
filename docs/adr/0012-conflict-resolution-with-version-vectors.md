@@ -1,7 +1,7 @@
 # ADR 0012: Conflict Resolution with Version Vectors
 
 **Status:** Accepted
-**Date:** 2026-07-30
+**Date:** 2026-08-07
 
 ## Context
 

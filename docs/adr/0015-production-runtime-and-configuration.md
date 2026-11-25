@@ -1,11 +1,11 @@
 # ADR 0015: Production Runtime and Configuration
 
 **Status:** Accepted
-**Date:** 2026-07-30
+**Date:** 2026-08-07
 
 ## Context
 
-Phase 10 requires a production-ready runtime infrastructure, including configuration management, application bootstrapping, and graceful shutdown.
+A production deployment requires a production-ready runtime infrastructure, including configuration management, application bootstrapping, and graceful shutdown.
 
 ## Decision
 

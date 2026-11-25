@@ -1,9 +1,8 @@
 # Architecture
 
-> Status: **Phases 1–10 fully implemented** — This document reflects the
-> current production-ready architecture of SecureSync, including peer
-> discovery, encrypted transfers, conflict resolution, and the SQLite
-> metadata store.
+> Status: **Current** — this document reflects the architecture as
+> implemented: peer discovery, encrypted transfers, conflict resolution,
+> and the SQLite metadata store.
 
 ## 1. Architectural Style
 

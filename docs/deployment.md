@@ -1,8 +1,8 @@
 # Deployment
 
-> Status: **Design** — meaningful once Phase 5 (Transfer Engine) and
-> Phase 9 (CLI) exist. Documented now so the Dockerfile and
-> docker-compose.yml scaffolding built in Phase 0.5 has a clear target.
+> Status: **Current** — the Dockerfile and docker-compose.yml in the
+> repository root follow this document; the systemd unit below is an
+> example template.
 
 ## 1. Deployment diagram
 
@@ -63,8 +63,7 @@ The image runs as a non-root user (`securesync`) — see the Dockerfile.
 
 ## 4. Running natively (systemd)
 
-*(Example unit file — finalized once the CLI entry point exists in
-Phase 9.)*
+*(Example unit file.)*
 
 ```ini
 [Unit]
@@ -91,7 +90,6 @@ Both are configurable — see `docs/configuration.md`.
 
 ## 6. Upgrading
 
-*(Populated once the metadata database schema and protocol versioning are
-implemented — Phases 5–8. Will cover: schema migrations, protocol
-version negotiation between an upgraded and a not-yet-upgraded peer, and
-rollback guidance.)*
+Not covered yet: schema migrations, protocol version negotiation
+between an upgraded and a not-yet-upgraded peer, and rollback
+guidance. Those land with protocol versioning.

@@ -1,30 +1,30 @@
 # ADR 0016: Real Use-Case Wiring, an In-Process Encrypted Transport, and the Disclosed Socket-Transport Gap
 
 **Status:** Accepted
-**Date:** Post-Phase-10 integration audit
+**Date:** 2026-08-07
 
 ## Context
 
 An audit of the working tree (everything claimed complete through
-Phase 10) found that several components built in isolation, each with
+the production runtime) found that several components built in isolation, each with
 passing unit tests, were never actually wired together:
 
-- `SyncOrchestrator` (Phase 9) received `discovery_use_case`,
+- `SyncOrchestrator` received `discovery_use_case`,
   `download_use_case`, `upload_use_case`, and `conflict_use_case` in
   its constructor but never called any of them outside `__init__` —
   its background loop only slept, with a comment reading *"In a real
   implementation, this would react to events."*
-- `main.py` (Phase 10) constructed `SyncOrchestrator` with a
+- `main.py` constructed `SyncOrchestrator` with a
   hand-rolled `MagicMock` class standing in for all four use cases,
-  commented *"Mocks for demonstration in this phase,"* with four
+  commented *"Mocks for demonstration,"* with four
   `# type: ignore[arg-type]` suppressing the resulting (correct)
   mypy errors, and read `orchestrator._stop_event` directly — a
   private attribute accessed from outside the class.
-- The entire crypto layer (Phase 6 — `PycaKeyExchangeProvider`,
+- The entire crypto layer (`PycaKeyExchangeProvider`,
   `AesGcmCipher`, `ChaCha20Cipher`) was fully unit-tested but never
   referenced anywhere else in the codebase; chunks would have moved
   over any real transport unencrypted.
-- `TransferTransport.request_chunks` (Phase 5) was declared as a
+- `TransferTransport.request_chunks` was declared as a
   plain coroutine (no `yield`) but called with `async for` directly
   in `transfer_chunks.py`, papered over with
   `# type: ignore[attr-defined]` — and no concrete implementation of
@@ -71,8 +71,8 @@ delivers them to the recipient's inbox in a shared `InProcessNetwork`;
 instances and correctly transferred multiple chunks end to end, with a
 wrong decryption key confirmed to raise `cryptography.exceptions.InvalidTag`
 rather than silently succeeding. It does not touch
-`Chunk.__post_init__`'s `len(data) == metadata.size` invariant from
-Phase 2 — encryption happens entirely in the wire-framing layer, never
+`Chunk.__post_init__`'s `len(data) == metadata.size` invariant —
+encryption happens entirely in the wire-framing layer, never
 by mutating a `Chunk`'s `data` field, so that invariant needed no
 change.
 
@@ -110,8 +110,8 @@ rather than silently omitted.
 
 **Positive**
 
-- Every one of the fixes above was runtime-verified in this session
-  (not merely reasoned about): the protocol round trip, the
+- Every one of the fixes above was runtime-verified (not merely
+  reasoned about): the protocol round trip, the
   tamper-detection paths, the full encrypted multi-chunk transfer
   through the unmodified application use cases, and the orchestrator's
   real discovery-start/stop calls and metadata-driven stats update.

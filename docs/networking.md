@@ -1,7 +1,7 @@
 # Networking
 
-> Status: **Design** — implemented in Phase 4 (Peer Discovery) and Phase 5
-> (Transfer Engine).
+> Status: **Current** — mDNS discovery and the encrypted TCP transfer
+> path are implemented.
 
 ## 1. Discovery mechanisms
 
@@ -40,8 +40,8 @@ flowchart TB
 
 SecureSync is fully peer-to-peer for devices on the same broadcast domain.
 Cross-network (WAN/NAT-traversed) sync is noted as a future relay-based
-extension and is explicitly **not** part of the current roadmap phases —
-see `ROADMAP.md`.
+extension and is explicitly **out of scope** for now — see
+`ROADMAP.md`.
 
 ## 3. Peer lifecycle
 

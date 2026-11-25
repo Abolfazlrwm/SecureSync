@@ -250,8 +250,8 @@ transcript-bound signed handshake, an explicit key-confirmation message, and an
 explicit rekey/teardown signal. Untrusting a peer (item 1f) purges every
 session for that peer via `SessionStore.remove_by_peer`.
 
-## 7. Open questions (to resolve during Phase 5 implementation)
+## 7. Open questions
 
 - Exact fragment reassembly strategy for `CHUNK_DATA` on very large files.
-- Whether `PEER_LIST` gossip is in scope for the first Transfer Engine
-  milestone or deferred to a later "mesh discovery" phase.
+- Whether `PEER_LIST` gossip is in scope for the first transfer
+  milestone or deferred to a later "mesh discovery" stage.

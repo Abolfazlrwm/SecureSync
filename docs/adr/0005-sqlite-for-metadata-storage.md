@@ -1,7 +1,7 @@
 # ADR 0005: SQLite for Metadata Storage
 
 **Status:** Accepted
-**Date:** Phase 0
+**Date:** 2026-07-25
 
 ## Context
 
@@ -37,7 +37,7 @@ accessed exclusively through a `Repository`-pattern adapter in
 
 ## Rejected: embedded key-value store (e.g. LMDB, RocksDB)
 
-Rejected for Phase 0 — SQLite's relational model maps naturally onto the
+Rejected for the initial scaffolding — SQLite's relational model maps naturally onto the
 actual query needs here (e.g. "all chunks for file X", "all files last
 synced with peer Y"), and adding a KV store would mean re-implementing
 indexing/query logic that SQLite already provides.

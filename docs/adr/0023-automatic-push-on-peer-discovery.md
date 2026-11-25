@@ -1,7 +1,7 @@
-# ADR 0023: Automatic Push on Peer Discovery, Deferring "Is It Actually Newer" to Phase 17
+# ADR 0023: Automatic Push on Peer Discovery, Deferring "Is It Actually Newer" to Direction Resolution
 
 **Status:** Accepted
-**Date:** Post-Phase-15 follow-up
+**Date:** 2026-08-25
 
 ## Context
 
@@ -17,7 +17,7 @@ or `version_vector` against the peer's — isn't available yet.
 `ManifestExchangeTransport` (the only channel this codebase has for
 asking a peer about a file) returns a `ChunkCollection`: chunk hashes
 and offsets, nothing else. No `FileMetadata`, no version vector, ever
-crosses the wire. Building that exchange is exactly Phase 7's
+crosses the wire. Building that exchange is exactly
 `DetectConflictUseCase` becoming reachable over the network — deferred
 by ADR-0022 and still not done.
 
@@ -48,7 +48,7 @@ method.
 `sync_file_use_case`, `sync_root`, `chunking_strategy`, and
 `chunk_size` are new optional constructor parameters, following the
 existing `download_use_case`/`upload_use_case` pattern: omitting them
-reproduces the exact pre-Phase-16 behavior (peers tracked, nothing
+reproduces the original do-nothing behavior (peers tracked, nothing
 synced). If `sync_file_use_case` is set but any of the other three
 is missing, `_auto_push_known_files` logs a warning and returns rather
 than raising — a wiring mistake in a composition root shouldn't crash
@@ -62,7 +62,7 @@ peer discovery for every other peer.
   the gap this ADR set out to close.
 - No new network protocol or remote-metadata exchange needed — reuses
   exactly the manifest diff ADR-0022 already proved correct.
-- The pre-Phase-16 default (no `sync_file_use_case` configured) is
+- The do-nothing default (no `sync_file_use_case` configured) is
   unchanged, verified by a dedicated regression test.
 
 **Negative / trade-offs accepted**
@@ -71,26 +71,27 @@ peer discovery for every other peer.
   cannot distinguish a genuine local edit from a local device that's
   simply behind — pushing in that second case would silently overwrite
   the peer's newer content with this device's stale copy.
-  `DetectConflictUseCase` (Phase 7) is still not wired into this path;
-  doing so is Phase 17's entire scope, not addressed here.
+  `DetectConflictUseCase` is still not wired into this path;
+  wiring it in is the direction resolver's job (ADR-0024), not
+  addressed here.
 - Every discovered peer gets every locally known file pushed at
   discovery time, even ones that were already fully synced moments
   ago (e.g. a peer briefly dropping offline and reappearing). The
   manifest-diff no-op keeps this cheap, not free — one manifest
   request per file, per rediscovery.
-- A file that fails to push is only logged, not retried. Phase 19's
-  retry/backoff work covers connection-level retries; a file skipped
+- A file that fails to push is only logged, not retried. Connection-level
+  retries and backoff are separate roadmap items; a file skipped
   for another reason (e.g. deleted from disk) isn't picked up again
   until the next time this peer is (re)discovered.
 
-## Rejected: wait for Phase 17 and wire both together
+## Rejected: wait for direction resolution and wire both together
 
 Would avoid ever pushing a file the peer's own edit should have taken
-precedence over. Rejected because Phase 16 was scoped, deliberately,
-to auto-push without conflict detection — folding Phase 17 in here
-would just be doing Phase 17 under Phase 16's name. The risk above is
-accepted explicitly and short-lived: it closes as soon as Phase 17
-lands `DetectConflictUseCase` on this same path.
+precedence over. Rejected because auto-push was deliberately scoped
+without conflict detection — folding the resolver in here would just
+rename this ADR into that one. The risk above is accepted explicitly
+and short-lived: it closes as soon as direction resolution
+(ADR-0024) lands `DetectConflictUseCase` on this same path.
 
 ## Rejected: compare local `last_modified` against the peer's last-seen timestamp
 

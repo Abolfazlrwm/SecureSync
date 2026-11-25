@@ -1,7 +1,7 @@
 # ADR 0017: A Real TCP Transport — and Why It Still Isn't Wired Into `main.py`
 
 **Status:** Accepted
-**Date:** Post-ADR-0016 follow-up
+**Date:** 2026-08-09
 
 ## Context
 
@@ -23,8 +23,8 @@ outbound chunk. Each connection carries one length-prefixed, AEAD-encrypted
 envelope (`core/protocol.py` framing, same as `InProcessTransferTransport`) —
 length-prefixing is necessary here because TCP is a byte stream with no
 message boundaries of its own, unlike the in-process transport's
-already-discrete `asyncio.Queue` items. Verified in this session, not
-just reasoned about: two real instances listening on real localhost
+already-discrete `asyncio.Queue` items. Verified against real
+sockets, not just reasoned about: two instances listening on real localhost
 ports transferred multiple chunks bidirectionally through the
 unmodified `UploadChunksUseCase`/`DownloadChunksUseCase`, and a
 receiver with the wrong key correctly got `cryptography.exceptions.InvalidTag`
@@ -99,7 +99,7 @@ mistake in a different shape.
 The handshake is a genuinely separate piece of work — parsing
 `HELLO`/`KEY_EXCHANGE`/`AUTH` packets, running the X25519 exchange,
 calling `derive_session_keys` (whose send/receive key-swap ambiguity,
-flagged during the Phase 4-10 docstring audit, must be resolved
+flagged during the docstring audit, must be resolved
 correctly here specifically), and deciding peer authentication policy
 (trust-on-first-use? a known-peers list?). Scoping it into this ADR
 would risk rushing exactly the piece of this system with the highest

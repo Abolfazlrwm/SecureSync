@@ -1,7 +1,7 @@
 # ADR 0027: The Handshake Is Not Transcript-Bound — a Disclosed Gap for Item 1e
 
 **Status:** Accepted (discloses a known gap; closed by the 1e handshake)
-**Date:** Phase 22
+**Date:** 2026-10-30
 
 ## Context
 

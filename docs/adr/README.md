@@ -13,7 +13,7 @@ gets a new ADR that says so and links back, rather than editing history).
 | [0006](0006-filesystem-watcher-port-and-watchdog-adapter.md) | Filesystem Watcher Port with a `watchdog` Adapter | Accepted |
 | [0007](0007-chunking-strategy-as-a-pluggable-port.md) | Chunking Strategy as a Pluggable Port (Strategy Pattern) | Accepted |
 | [0008](0008-synchronous-chunk-engine-core-with-async-boundary.md) | Synchronous Chunk-Engine Core with an Async Use-Case Boundary | Accepted |
-| [0009](0009-content-addressable-delta-computation.md) | Content-Addressable Delta Computation, Reusing the Phase 2 Chunk Cache | Accepted |
+| [0009](0009-content-addressable-delta-computation.md) | Content-Addressable Delta Computation, Reusing the Chunk Cache | Accepted |
 | [0010](0010-persistent-manifest-storage-is-chunk-repository.md) | Persistent Manifest Storage Is Already `ChunkRepository` / `FileChunkRepository` | Accepted |
 | [0011](0011-peer-discovery-with-mdns-and-in-memory-repo.md) | Peer Discovery with mDNS and In-Memory Peer Cache | Accepted |
 | [0012](0012-conflict-resolution-with-version-vectors.md) | Conflict Resolution with Version Vectors | Accepted |
@@ -39,7 +39,7 @@ gets a new ADR that says so and links back, rather than editing history).
 # ADR NNNN: <Title>
 
 **Status:** Proposed | Accepted | Superseded by ADR-XXXX
-**Date:** <phase or date>
+**Date:** <YYYY-MM-DD>
 
 ## Context
 <What forces are at play; what problem needs a decision>

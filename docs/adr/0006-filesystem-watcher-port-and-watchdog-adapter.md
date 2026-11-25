@@ -1,11 +1,11 @@
 # ADR 0006: Filesystem Watcher Port with a `watchdog` Adapter
 
 **Status:** Accepted
-**Date:** Phase 1
+**Date:** 2026-07-25
 
 ## Context
 
-Phase 1 requires real-time filesystem monitoring (create/modify/delete/
+the filesystem watcher requires real-time filesystem monitoring (create/modify/delete/
 move/rename) across multiple directories, optionally recursively, with
 duplicate-event suppression, async dispatch to multiple consumers, and
 graceful shutdown. `docs/architecture.md` already named `watchdog` as the
@@ -58,7 +58,7 @@ Two alternatives were considered for detecting filesystem changes:
   only on the `FileWatcher` port — never on `WatchdogFileWatcher`
   directly — so the concrete adapter is supplied via dependency
   injection at the composition root (today: test fixtures and
-  integration tests; from Phase 9 onward: the CLI entry point).
+  integration tests; from the orchestrator onward: the CLI entry point).
 
 ## Consequences
 

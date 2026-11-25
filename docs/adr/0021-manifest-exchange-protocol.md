@@ -1,15 +1,15 @@
 # ADR 0021: A Real Manifest Exchange Protocol
 
 **Status:** Accepted
-**Date:** Post-Phase-13 follow-up
+**Date:** 2026-08-17
 
 ## Context
 
-By the end of Phase 13, SecureSync could authenticate two peers,
+By the end of the authentication work, SecureSync could authenticate two peers,
 negotiate encrypted session keys, and move chunk bytes between them —
 but only if the caller already knew *which* chunks needed moving.
 Nothing let one peer ask another "what do you have for this file?" —
-the one piece of information `DeltaCalculator` (Phase 3) actually
+the one piece of information `DeltaCalculator` actually
 needs to compute anything. Without it, no synchronization can happen
 between two real machines regardless of how correct every other layer
 is.
@@ -21,7 +21,7 @@ new, minimal port: `request_manifest(peer, source_path) -> ChunkCollection | Non
 Placed deliberately alongside `TransferTransport` rather than folded
 into it — moving chunk bytes and answering "what do you have" are
 different request shapes (fire-and-forget push vs. request/response),
-and Phase 11-13 already established that pattern split for a reason
+and the existing transports already established that split for a reason
 (see ADR-0016's "Rejected: give `TcpTransferTransport` its own
 internal handshake logic").
 
@@ -47,7 +47,7 @@ function pair, not two independently-maintained copies.
 `peer_manifest_port` alongside `peer_transfer_port`, exchanged the
 same way (as part of the signed handshake payload, not guessed from
 an offset — see ADR-0020's reasoning, which applies identically here).
-Verified in this session: a full chain — handshake exchanges the real
+Verified end to end: a full chain — handshake exchanges the real
 manifest port, `TcpManifestExchangeTransport` connects to exactly that
 port, and a request for a file the peer actually has returns its real
 `ChunkCollection` (chunk hash confirmed matching), while a request for
@@ -74,7 +74,7 @@ alongside the chunk transfer transport, verified by actually running
   parallel manifest store keeps this consistent with ADR-0010's
   "no second manifest-storage component" decision — the same
   reasoning applies to a network-facing store as it did to a
-  Phase-4-brief-proposed local one.
+  brief-proposed local one.
 
 **Negative / trade-offs accepted**
 

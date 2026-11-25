@@ -1,7 +1,7 @@
 # ADR 0003: `cryptography` (pyca) as the Sole Cryptographic Library
 
 **Status:** Accepted
-**Date:** Phase 0
+**Date:** 2026-07-25
 
 ## Context
 

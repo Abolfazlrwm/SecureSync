@@ -1,7 +1,7 @@
 # ADR 0002: `asyncio` as the Async Runtime
 
 **Status:** Accepted
-**Date:** Phase 0
+**Date:** 2026-07-25
 
 ## Context
 

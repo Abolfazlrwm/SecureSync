@@ -1,7 +1,7 @@
 # ADR 0004: Fixed Binary Header + MessagePack Payload
 
 **Status:** Accepted
-**Date:** Phase 0
+**Date:** 2026-07-25
 
 ## Context
 

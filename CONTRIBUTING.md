@@ -5,19 +5,14 @@ project is developed day to day.
 
 ## Development workflow
 
-SecureSync is built phase by phase (see [ROADMAP.md](ROADMAP.md)). Each
-phase corresponds to one cohesive module (filesystem watcher, chunk engine,
-transfer engine, etc.) and is merged only once it is fully implemented,
-tested, and documented.
-
-1. **Open an issue first** for anything beyond a trivial fix — bug reports
+1. **Open an issue first** for anything beyond a trivial fix. Bug reports
    use the *Bug report* template, proposals use the *Feature request*
    template (see `.github/ISSUE_TEMPLATE/`).
-2. **Fork and branch** from `main`. Branch naming: `phase/<n>-<short-name>`
-   for roadmap work, `fix/<short-name>` for bug fixes, `docs/<short-name>`
+2. **Fork and branch** from `main`. Branch naming: `feat/<short-name>`
+   for new work, `fix/<short-name>` for bug fixes, `docs/<short-name>`
    for documentation-only changes.
-3. **Write the code, then the tests, then the docs** for the module you
-   touched — a change is not "done" until all three are updated.
+3. **Write the code, then the tests, then the docs** for the area you
+   touched. A change is not "done" until all three are updated.
 4. **Run the full local check suite** before opening a PR (see below).
 5. **Open a pull request** using the PR template. Link the issue it closes.
 

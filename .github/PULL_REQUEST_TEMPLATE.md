@@ -6,9 +6,10 @@
 
 Closes #
 
-## Roadmap phase
+## Area
 
-<!-- Which phase (docs/ROADMAP.md) does this belong to, if any? -->
+<!-- Which part of the codebase does this touch (chunking, networking,
+CLI, docs, ...)? -->
 
 ## Type of change
 

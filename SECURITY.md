@@ -8,8 +8,8 @@ Instead, report privately using one of:
 
 - GitHub's [private vulnerability reporting](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing/privately-reporting-a-security-vulnerability)
   feature on this repository ("Security" tab → "Report a vulnerability").
-- Email: `security@<project-domain>` *(placeholder — set once the project
-  has a domain / dedicated address)*.
+- Email: `ranjbaran.ar85@gmail.com` (please put "SecureSync security" in
+  the subject so it is not lost among regular mail).
 
 Please include:
 - A description of the vulnerability and its potential impact
@@ -27,12 +27,13 @@ Please include:
 
 ## Supported Versions
 
-*(Placeholder — populated once the first tagged release exists. Until then,
-only the `main` branch is supported.)*
+Only the latest release line receives security fixes.
 
 | Version | Supported |
 |---|---|
-| `main` | ✅ |
+| 1.6.x | Yes |
+| < 1.6 | No |
+| `main` | Best effort (unstable) |
 
 ## Threat Model Summary
 

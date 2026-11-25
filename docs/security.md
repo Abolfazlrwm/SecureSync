@@ -1,10 +1,9 @@
 # Security
 
-> Status: **Design** — this document specifies the cryptographic design and
-> threat model that Phase 6 (End-to-End Encryption) and Phase 4 (Peer
-> Discovery / Authentication) implement against. It is treated as a living
-> document and revised whenever a security-relevant decision is made
-> (each such revision gets an ADR — see `docs/adr/`).
+> Status: **Current** — this document describes the cryptographic design
+> and threat model as implemented. It is a living document, revised
+> whenever a security-relevant decision is made (each such revision
+> gets an ADR — see `docs/adr/`).
 
 ## 1. Design principle
 
@@ -130,13 +129,15 @@ malleability probes as strict expected failures until 1e lands.
 - Protection against a fully compromised endpoint (malware with local
   filesystem access can always read plaintext files — no sync tool can
   prevent this).
-- Formal, third-party cryptographic audit — noted as a prerequisite before
-  any "production-ready" claim is made (tracked in `ROADMAP.md`).
+- Formal, third-party cryptographic audit — a prerequisite before any
+  "production-ready" claim; not yet scheduled.
 - Anonymity / traffic analysis resistance (SecureSync hides file *contents*,
   not the fact that two IPs are syncing with each other).
 
 ## 5. Key storage
 
-Long-term identity keys are stored on disk encrypted at rest using a key
-derived from a user passphrase via Argon2id. Exact file format and location
-are finalized in Phase 6 and documented here at that time.
+Long-term identity keys are stored as raw bytes under the storage
+directory (`identity.private` / `identity.public`), with the private
+key file written with `0600` permissions. They are **not** encrypted
+at rest today; passphrase-protected key files (Argon2id-derived) are a
+planned hardening step and will be documented here when they land.

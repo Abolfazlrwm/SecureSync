@@ -1,11 +1,11 @@
 # ADR 0008: Synchronous Chunk-Engine Core with an Async Use-Case Boundary
 
 **Status:** Accepted
-**Date:** Phase 2
+**Date:** 2026-07-26
 
 ## Context
 
-Every use case shipped in Phase 1 (`MonitorDirectoriesUseCase`) is
+Every use case shipped at that point (`MonitorDirectoriesUseCase`) is
 `async def`, because `watchdog` delivers filesystem events from its own
 background thread — the application layer's job there is to bridge
 that thread's output into the asyncio event loop.
@@ -80,22 +80,22 @@ blocking the event loop, it does so via `asyncio.to_thread`:
 - `asyncio.to_thread` uses the default thread pool executor, which has
   a bounded worker count; a very large number of concurrent
   `ChunkFileUseCase.execute()` calls could contend for threads. Not a
-  concern for Phase 2 (a single file is chunked by a single caller);
-  worth revisiting once Phase 5 (Transfer Engine) needs many
+  concern today (a single file is chunked by a single caller);
+  worth revisiting once the transfer engine needs many
   concurrent chunking operations.
 - **Measured cost**: each chunk crosses one `asyncio.to_thread` round
   trip. On a 200MB file at the default 4 MiB chunk size (50 chunks),
   going through `ChunkFileUseCase` measured ~1.4x slower end-to-end
   than calling `StreamingChunkReader`/`SHA256HashProvider` directly in
-  a synchronous loop (see the measurement in the Phase 2 PR
+  a synchronous loop (see the measurement in the chunk-engine PR
   description) — real overhead, not zero-cost abstraction. Acceptable
-  for Phase 2 (a single file's chunking is not the system's throughput
+  for the chunk engine (a single file's chunking is not the system's throughput
   bottleneck; disk I/O and, later, network transfer dominate). If a
   future phase's profiling shows this mattering, the fix is batching —
   have `iter_in_thread` (or a chunk-engine-specific variant) drain
   several chunks per `to_thread` call instead of one — not abandoning
-  the sync-core design; not implemented now because Phase 2 has no
-  caller for whom it's the bottleneck.
+  the sync-core design; not implemented now because no
+  caller hits it as a bottleneck.
 
 ## Rejected: fully `async def` core (`async for chunk in reader.read_chunks(...)`)
 
@@ -112,7 +112,7 @@ knows about the asyncio runtime it's composed into.
 
 ## Rejected: fully synchronous use cases (no `async def` at all)
 
-Would be simpler for Phase 2 in isolation, but breaks the calling
+Would be simpler for the chunk engine in isolation, but breaks the calling
 convention every other use case in the codebase follows
 (`MonitorDirectoriesUseCase`), and would force a future presentation
 layer (CLI, Transfer Engine) that's already `async` throughout to special-case

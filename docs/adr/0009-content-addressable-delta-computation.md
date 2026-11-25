@@ -1,24 +1,24 @@
-# ADR 0009: Content-Addressable Delta Computation, Reusing the Phase 2 Chunk Cache
+# ADR 0009: Content-Addressable Delta Computation, Reusing the Chunk Cache
 
 **Status:** Accepted
-**Date:** Phase 3
+**Date:** 2026-07-30
 
 ## Context
 
-`ROADMAP.md`'s Phase 3 entry is "Hash comparison, chunk cache, transfer
-only changed chunks." Two design questions need settling before any
+The delta-sync brief is short: hash comparison, a chunk cache,
+transfer only changed chunks. Two design questions need settling before any
 code is written:
 
-1. **What counts as the "chunk cache"?** Phase 2 already shipped
-   `ChunkRepository` (`domain/chunking.py`) — a port for saving and
+1. **What counts as the "chunk cache"?** The chunk engine already
+   shipped `ChunkRepository` (`domain/chunking.py`) — a port for saving and
    loading a file's `ChunkCollection` manifest by source path, with a
    filesystem-backed implementation (`FileChunkRepository`) explicitly
-   documented as a placeholder for the Phase 8 SQLite store. A
+   documented as a stand-in for a future SQLite-backed store. A
    manifest of chunk hashes, keyed by file and swappable in storage
-   technology, *is* a chunk cache in every sense the roadmap entry
+   technology, *is* a chunk cache in every sense the brief above
    asks for.
 2. **How should "changed" be decided — by position or by content?**
-   `ChunkMetadata.chunk_id`'s own docstring (written in Phase 2)
+   `ChunkMetadata.chunk_id`'s own docstring
    already anticipates this: *"a future Delta Sync / dedup phase
    compares `chunk_hash` values, never `chunk_id` values, across
    sources."* Comparing the *N*-th chunk of the baseline against the
@@ -51,8 +51,8 @@ as long as its bytes, and therefore its hash, are unchanged.
 **Read-only use case.** `ComputeDeltaUseCase.execute` returns a
 `DeltaPlan` (which carries `plan.current`, the freshly built manifest)
 but never calls `repository.save(...)` itself. Updating the baseline
-is the caller's explicit, separate step. This phase has no Transfer
-Engine yet (`Phase 5`, still `[ ]` in `ROADMAP.md`) — persisting a new
+is the caller's explicit, separate step. Delta sync has no transfer
+engine of its own — persisting a new
 baseline before the chunks in `plan.chunks_to_transfer` have actually
 reached a peer would let the cache claim content is already
 synchronized when it might not be.
@@ -61,10 +61,10 @@ synchronized when it might not be.
 
 **Positive**
 
-- Zero new infrastructure: `FileChunkRepository` from Phase 2 is
+- Zero new infrastructure: `FileChunkRepository` is
   reused unchanged as the chunk cache, exactly as its own docstring
   ("the port stays the same either way") anticipated.
-- Content-addressable matching means Phase 3's design already
+- Content-addressable matching means this design already
   accommodates a future content-defined `ChunkingStrategy`
   (ADR-0007) without any change to `DeltaCalculator` — CDC's whole
   point is that chunk boundaries (and therefore indices) shift as
@@ -75,7 +75,7 @@ synchronized when it might not be.
   `ComputeDeltaUseCase`'s repository read is wrapped in
   `asyncio.to_thread`.
 - Keeping the use case read-only means a caller that fails partway
-  through transferring `plan.chunks_to_transfer` (once Phase 5 exists)
+  through transferring `plan.chunks_to_transfer` (once the transfer engine exists)
   can simply not call `repository.save(plan.current)` — no
   compensating "undo the cache update" logic is ever needed, because
   the update never happened speculatively in the first place.
@@ -86,21 +86,21 @@ synchronized when it might not be.
   baseline's chunk *count* (never chunk content, consistent with
   `ChunkCollection`'s own memory model) — a few hundred thousand small
   hash records for any realistic chunk size and file size, not a
-  concern for Phase 3's scope.
+  concern for delta sync's scope.
 - Hash-set matching cannot distinguish "this exact chunk, at this
   exact position, is unchanged" from "some chunk somewhere in the
   baseline happens to have identical bytes" (e.g. a run of zero bytes,
   or a duplicated block). Both are legitimately reusable — the peer
   already has those bytes under some existing chunk it can serve from
   — but a future phase that needs to reconstruct the file byte-for-byte
-  from reused chunks (the Transfer Engine, Phase 5) must resolve *which*
+  from reused chunks (the transfer engine) must resolve *which*
   baseline chunk to reuse when several share a hash, not just *whether*
   to reuse one. Out of scope here: `DeltaPlan` only classifies the
   *current* file's chunks; it does not yet produce a byte-level
   reconstruction recipe.
 - No tombstoning of removed content: `DeltaPlan` doesn't report chunks
   present in `baseline` but absent from `current` (e.g. the file
-  shrank). Not needed for "transfer only changed chunks" — Phase 3's
+  shrank). Not needed for "transfer only changed chunks" — delta sync's
   literal scope — but a full sync/reconciliation use case in a later
   phase will need that information too, and can compute it the same
   way (`baseline_hashes - current_hashes`) without any change to

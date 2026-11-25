@@ -1,11 +1,11 @@
 # ADR 0022: File Synchronization — Explicit Push/Pull, Not Automatic Bidirectional
 
 **Status:** Accepted
-**Date:** Post-Phase-14 follow-up
+**Date:** 2026-08-21
 
 ## Context
 
-Phase 14 built a real manifest exchange; nothing yet composed it with
+The manifest exchange (ADR-0021) is real; nothing yet composed it with
 delta computation and transfer into an actual "synchronize this file"
 operation. Building `SyncFileUseCase` and verifying it against two
 real peer processes surfaced three genuine bugs — not edge cases found
@@ -84,7 +84,7 @@ two-device test scenario, in the order they were found:
 `infrastructure/chunking/local_file_reconstructor.py`) is a new,
 narrow port: write one chunk's bytes at its offset within a larger
 file being reconstructed. Deliberately not
-`~securesync.domain.chunking.ChunkWriter` (Phase 2) — that port writes
+`~securesync.domain.chunking.ChunkWriter` — that port writes
 a chunk's bytes as its own standalone file, the wrong shape for
 writing into one reconstructed target file at a byte offset. Verified:
 out-of-order chunk writes reassemble correctly, and writing one chunk
@@ -99,7 +99,7 @@ never disturbs bytes belonging to others already written.
   consistent with this project's standard of verifying claims rather
   than asserting them.
 - Explicit `push`/`pull` means `SyncFileUseCase` can never itself
-  cause the data-loss bug found in this session: either method touches
+  cause the data-loss bug described above: either method touches
   only one direction, full stop.
 - The relative-path fix generalizes correctly beyond this one bug —
   any future cross-peer file reference in this codebase should use
@@ -114,7 +114,7 @@ never disturbs bytes belonging to others already written.
   proven correct in isolation, not the orchestration that would invoke
   it automatically for every discovered peer and every synced file).
   Making that automatic requires real conflict detection (version
-  vectors, Phase 7's `DetectConflictUseCase`, not yet wired to this
+  vectors, `DetectConflictUseCase`, not yet wired to this
   path) to choose push vs. pull vs. "these genuinely conflict, ask the
   user" — deliberately not decided here.
 - `push` always overwrites the remote peer's version of any chunk it

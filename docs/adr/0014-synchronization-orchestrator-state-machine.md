@@ -1,7 +1,7 @@
 # ADR 0014: Synchronization Orchestrator State Machine
 
 **Status:** Accepted
-**Date:** 2026-07-30
+**Date:** 2026-08-07
 
 ## Context
 

@@ -1,12 +1,12 @@
 # ADR 0010: Persistent Manifest Storage Is Already `ChunkRepository` / `FileChunkRepository`
 
 **Status:** Accepted
-**Date:** Post-Phase-3 reconciliation
+**Date:** 2026-07-30
 
 ## Context
 
-A task brief arrived describing a "Phase 4 — Persistent Manifest
-Repository": a versioned, atomic, JSON-on-disk store for a file's
+A task brief arrived proposing a "Persistent Manifest Repository"
+component: a versioned, atomic, JSON-on-disk store for a file's
 chunk manifest, with a `JsonManifestRepository` infrastructure adapter
 and four new application use cases (`SaveManifestUseCase`,
 `LoadManifestUseCase`, `DeleteManifestUseCase`,
@@ -15,19 +15,18 @@ and four new application use cases (`SaveManifestUseCase`,
 Two things about that brief don't hold up against this repository's
 actual state, verified directly rather than taken on trust:
 
-1. **It isn't the project's real Phase 4.** `ROADMAP.md` (updated at
-   the end of Phase 3, before this brief arrived) defines Phase 4 as
-   **Peer Discovery** (UDP broadcast, mDNS, peer cache, heartbeat,
-   reconnect). The persistent-metadata-store work the brief describes
-   already has a place on the roadmap — **Phase 8, Metadata
-   Database** — and `FileChunkRepository`'s own module docstring,
-   written back in Phase 2, already says as much: *"A placeholder
-   until the SQLite-backed metadata store planned for Phase 8 lands."*
+1. **It overlaps existing plans rather than opening new ground.**
+   The next planned milestone was peer discovery; the
+   persistent-metadata-store work the brief describes was already
+   earmarked for a SQLite-backed metadata store, and
+   `FileChunkRepository`'s own module docstring already said as
+   much: *"The SQLite-backed metadata store can replace this behind
+   the same port."*
 2. **The functionality it asks for already exists.** `ChunkRepository`
-   (`domain/chunking.py`, Phase 2) is exactly "a manifest represents
+   (`domain/chunking.py`) is exactly "a manifest represents
    the state of one file after chunking; contains only metadata,
    never chunk bytes; one manifest per file" — that's `ChunkCollection`
-   verbatim, described by the port's own docstring. Its Phase 2
+   verbatim, described by the port's own docstring. Its
    implementation, `FileChunkRepository`
    (`infrastructure/chunking/file_chunk_repository.py`), already
    provides, verified against its actual code and its existing test
@@ -73,15 +72,10 @@ repository. No `JsonManifestRepository`, and no
 and a `delete`/`exists` capability is deferred until a concrete use
 case actually needs one (see Consequences).
 
-**`ROADMAP.md` is reconciled, not renumbered.** A new entry, **Phase
-3.5 — Persistent Manifest Repository (retroactive)**, is inserted
-between Phase 3 and Phase 4 to record that this capability was
-already delivered — as part of Phase 2's `ChunkRepository` port and
-Phase 3's reuse of it as the delta-sync chunk cache — rather than
-silently absorbing it into the Phase 3 entry after the fact. Phase 4
-(Peer Discovery) and every later phase keep their existing numbers
-unchanged; nothing about the roadmap's substance changes, only this
-gap in what it documented.
+**The decision is recorded, not re-architected.** Rather than adding
+a parallel manifest-storage component, this ADR records that the
+capability was already delivered — as part of the `ChunkRepository`
+port and the delta-sync layer's reuse of it as the chunk cache.
 
 **The audit found no genuine defect to fix.** Every substantive
 requirement in the brief (schema is metadata-only and never stores
@@ -97,12 +91,12 @@ unchanged by this reconciliation.
 
 - Zero duplicated code, zero duplicated port, zero contradiction of
   ADR-0009's DRY/YAGNI reasoning.
-- The roadmap gap is now recorded truthfully instead of silently
-  reinterpreting Phase 3's scope after the fact — future readers of
-  `ROADMAP.md`/`CHANGELOG.md` see exactly when persistent manifest
-  storage actually arrived (Phase 2) versus when it was formally
-  documented as its own milestone (this reconciliation).
-- `FileChunkRepository` remains exactly what Phase 2's tests already
+- The gap is now recorded truthfully instead of silently
+  reinterpreting delta sync's scope after the fact — future readers of
+  the ADRs and the changelog see exactly when persistent manifest
+  storage actually arrived (with the chunk engine) versus when it was
+  formally documented (this reconciliation).
+- `FileChunkRepository` remains exactly what the chunk engine's tests already
   verify; no risk was introduced by editing already-production code
   without a concrete bug driving the change.
 
@@ -111,11 +105,11 @@ unchanged by this reconciliation.
 - No explicit JSON schema `"version"` field exists on the manifest
   format today. This was considered and deliberately not added here:
   the port's own docstring already commits to *replacing* this
-  adapter wholesale at Phase 8 (a JSON file store becoming a SQLite
+  adapter wholesale at the SQLite metadata store (a JSON file store becoming a SQLite
   database), not evolving the JSON schema in place — so an in-place
   version field would guard against a migration path this project
-  isn't taking. If Phase 8 changes course and needs to read
-  Phase-2-era JSON manifests during a transition, that migration can
+  isn't taking. If the SQLite metadata store changes course and needs to read
+  the chunk engine's original JSON manifests during a transition, that migration can
   inspect the (already fully typed) JSON structurally; version
   negotiation logic can be added then, against a concrete real need,
   rather than speculatively now.
@@ -130,7 +124,7 @@ unchanged by this reconciliation.
   the `ChunkRepository` port — extending the existing one, still not
   a new component — at the point that need is real.
 - The manifest JSON is compact (`orjson.dumps` with no indent option),
-  not pretty-printed. This was a Phase 2 design choice for a
+  not pretty-printed. This was a chunk-engine design choice for a
   machine-only artifact no one is expected to hand-edit, made before
   this brief and unrelated to it; changing it now, with no bug behind
   it, would be an unrequested behavior change to already-shipped code
@@ -142,15 +136,15 @@ Would satisfy the brief's literal text but duplicate
 `ChunkRepository`/`FileChunkRepository` under new names for no
 behavioral difference — the same DRY/YAGNI violation ADR-0009 already
 rejected once. Also wrong on process grounds: it would silently
-treat an external brief's phase numbering as authoritative over this
-repository's own `ROADMAP.md`, which is exactly the "never trust
+treat an external brief's structure as authoritative over this
+repository's own design, which is exactly the "never trust
 documentation, verify everything yourself" failure mode this project's
 own working process exists to catch.
 
-## Rejected: fold this reconciliation silently into the existing Phase 3 entry
+## Rejected: fold this reconciliation silently into ADR-0009
 
-Editing the Phase 3 `ROADMAP.md`/`CHANGELOG.md` entries after the fact
-to retroactively claim they always covered "persistent manifest
-storage" would erase the fact that this was a separate, later
-clarification — making the project history less honest about *when*
-each capability was actually established and reviewed.
+Editing ADR-0009 and the changelog entries after the fact to
+retroactively claim they always covered "persistent manifest storage"
+would erase the fact that this was a separate, later clarification —
+making the project history less honest about *when* each capability
+was actually established and reviewed.

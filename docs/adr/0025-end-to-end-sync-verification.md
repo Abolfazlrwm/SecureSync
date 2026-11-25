@@ -1,23 +1,23 @@
 # ADR 0025: End-to-End Sync Verification
 
 **Status:** Accepted
-**Date:** Phase 20
+**Date:** 2026-08-29
 
 ## Context
 
-Phases 0-19 built and unit-tested every layer of the sync pipeline in
+Every layer of the sync pipeline had been built and unit-tested in
 isolation — chunking, delta computation, discovery, encryption,
 conflict resolution, metadata storage, and the version-aware direction
 logic from ADR-0024 — but no test had ever run two full, independently
 bootstrapped instances of the actual application and confirmed a file
-created on one device ends up correctly on the other. This phase
+created on one device ends up correctly on the other. This work
 built that test and, as intended, it immediately surfaced real bugs
 and gaps that unit tests — which necessarily construct their own
 components in isolation — couldn't see.
 
 ## What the test found
 
-### 1. `main.py` never actually wired the Phase 15-17 sync pipeline in
+### 1. `main.py` never actually wired the file-sync pipeline in
 
 `SyncOrchestrator` was constructed without `sync_file_use_case`,
 `sync_root`, or `chunking_strategy`. `_auto_push_known_files` silently
@@ -26,7 +26,7 @@ in every real run of the application. `SyncFileUseCase`,
 `SyncDirectionResolver`, `ChunkFileUseCase`, `CalculateChunkHashesUseCase`,
 and `LocalFileReconstructor` were all built, unit-tested, and
 documented (ADR-0022, ADR-0024) — and never once constructed by
-`main.py`. Every phase since 15 had been adding real, tested code to a
+`main.py`. Several rounds of work had been adding real, tested code to a
 pipeline the running application didn't use.
 
 **Fixed:** `bootstrap()` now constructs and wires
@@ -108,7 +108,7 @@ crypto round-trip byte-for-byte across two independent processes.
 
 ## Consequences
 
-- Real cross-device sync (the entire point of Phases 11-19) now
+- Real cross-device sync (the entire point of the networking work) now
   actually runs when the daemon starts, for the first time.
 - The project's two most-tested-in-isolation layers (transport,
   orchestration) had bugs that only a genuine two-process test could

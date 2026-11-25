@@ -1,13 +1,13 @@
 # ADR 0026: Push Receiver
 
 **Status:** Accepted
-**Date:** Phase 21
+**Date:** 2026-08-30
 
 ## Context
 
-ADR-0025 (Phase 20) disclosed a real, deliberately unfixed gap: a
+ADR-0025 disclosed a real, deliberately unfixed gap: a
 `push` (ADR-0023/0024) really did deliver an encrypted chunk to a
-peer's real listening socket once Phase 20's three bugs were fixed,
+peer's real listening socket once the three wiring bugs were fixed,
 but nothing on the receiving side ever turned that arriving chunk into
 a reconstructed file. `pull` doesn't have this problem — it uses
 `ManifestExchangeTransport.request_chunks`, a genuine request/response
@@ -78,7 +78,7 @@ parameter even though the runtime behavior always worked).
 
 ## Consequences
 
-`tests/integration/test_end_to_end_sync.py` (Phase 20) was rewritten
+`tests/integration/test_end_to_end_sync.py` was rewritten
 to remove its manual `DownloadChunksUseCase` workaround entirely — it
 now just writes a file on one real instance and polls for it to
 appear on the other, the way a person actually using SecureSync would

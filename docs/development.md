@@ -116,8 +116,7 @@ src/securesync/
   `asyncio.to_thread` directly (for a single blocking call) rather than
   making the helper itself `async def` over a blocking implementation.
 
-## Working across phases
+## Working on features
 
-Each roadmap phase (`ROADMAP.md`) is developed on its own branch and merged
-as a complete, tested, documented unit — avoid mixing code from two
-different phases in one PR.
+Each feature is developed on its own branch and merged as a complete,
+tested, documented unit — avoid mixing unrelated changes in one PR.

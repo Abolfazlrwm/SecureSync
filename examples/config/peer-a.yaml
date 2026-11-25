@@ -2,41 +2,21 @@
 # Schema documented in docs/configuration.md
 # Used by docker-compose.yml's securesync-a service.
 
-device:
-  id: auto
-  name: "peer-a"
+profile: "production"
 
-sync:
-  folders:
-    - path: "/home/securesync/data"
-      ignore:
-        - "*.tmp"
-        - ".DS_Store"
+device_id: null  # null/omitted: a fresh UUID is generated on first run
+
+storage:
+  sync_directory: "/home/securesync/data"
+  database_path: "/home/securesync/metadata.db"
+  chunk_repository_path: "/home/securesync/chunks"
+  chunk_size: 4194304  # 4 MiB
 
 network:
-  discovery:
-    udp_broadcast: true
-    mdns: true
-    broadcast_port: 21027
-  transfer:
-    listen_port: 22000
-    max_parallel_transfers: 4
-    compression: true
+  port: 22000              # handshake server
+  transfer_port: 22002     # encrypted chunk transfer
+  manifest_port: 22003     # manifest exchange
+  discovery_enabled: true
+  mDNS_service_type: "_securesync._tcp.local."
 
-security:
-  cipher: "aes-256-gcm"
-  key_rotation:
-    max_bytes: 10_000_000_000
-    max_age_seconds: 3600
-  require_authorization: true
-
-reconnect:
-  backoff:
-    base_seconds: 1
-    multiplier: 2
-    max_seconds: 60
-  heartbeat_interval_seconds: 10
-
-logging:
-  level: "info"
-  format: "json"
+log_level: "INFO"

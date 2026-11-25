@@ -33,8 +33,8 @@ USER securesync
 # Sync data directory and SQLite metadata store live under this volume.
 VOLUME ["/home/securesync/data"]
 
-# Peer discovery (UDP) + transfer engine (TCP/TLS) — see docs/networking.md
-# and docs/configuration.md for how these are made configurable.
+# Default handshake/transfer/manifest ports; every port is set in
+# config.yaml (network.port, network.transfer_port, network.manifest_port).
 EXPOSE 8080/tcp 8082/tcp 8083/tcp
 
 ENTRYPOINT ["securesync"]

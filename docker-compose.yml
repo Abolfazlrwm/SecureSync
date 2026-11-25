@@ -10,8 +10,9 @@ services:
       - ./examples/data/peer-a:/home/securesync/data
       - ./examples/config/peer-a.yaml:/home/securesync/config.yaml:ro
     ports:
-      - "22000:22000/tcp"
-      - "21027:21027/udp"
+      - "22000:22000/tcp"   # handshake
+      - "22002:22002/tcp"   # chunk transfer
+      - "22003:22003/tcp"   # manifest exchange
     networks:
       - securesync-net
 
@@ -23,8 +24,9 @@ services:
       - ./examples/data/peer-b:/home/securesync/data
       - ./examples/config/peer-b.yaml:/home/securesync/config.yaml:ro
     ports:
-      - "22001:22000/tcp"
-      - "21028:21027/udp"
+      - "22010:22010/tcp"
+      - "22012:22012/tcp"
+      - "22013:22013/tcp"
     networks:
       - securesync-net
 

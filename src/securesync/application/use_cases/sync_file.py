@@ -1,8 +1,8 @@
 """Use case: synchronize one file with a peer, in an explicit direction.
 
-Composes every piece built across Phases 3-14 into the first genuine
-end-to-end file sync: request the peer's manifest, diff it against
-the local one, and transfer whichever chunks are missing.
+Composes manifest exchange, delta computation and chunk transfer
+into one end-to-end file sync: request the peer's manifest, diff it
+against the local one, and transfer whichever chunks are missing.
 
 `push` and `pull` are deliberately separate, explicit-direction
 methods rather than one method that tries to reconcile both
@@ -10,14 +10,13 @@ directions automatically. A pure hash-set diff cannot tell "I have
 new content the peer needs" apart from "I have stale content the peer
 has already moved past" — both look identical to
 :class:`~securesync.domain.delta.DeltaCalculator`, which has no
-timestamp or version information to break the tie. Verified in this
-session: an automatic-bidirectional first version of this use case
-produced exactly that corruption (a device's fresh local edit
-overwritten by a peer's stale copy of the same chunk). Requiring the
-caller to say which direction it means removes the ambiguity
-entirely.
+timestamp or version information to break the tie. The first
+bidirectional version of this use case produced exactly that
+corruption (a device's fresh local edit overwritten by a peer's
+stale copy of the same chunk). Requiring the caller to say which
+direction it means removes the ambiguity entirely.
 
-Phase 17: `sync` is a higher-level method that consults
+`sync` is the higher-level entry point: it consults
 :class:`~securesync.domain.sync_direction.SyncDirectionResolver` and
 then dispatches to `push` / `pull` / `noop` / `conflict` handling
 automatically — using the `VersionVector` the peer's manifest
@@ -278,9 +277,9 @@ class SyncFileUseCase:
     ) -> SyncFileResult:
         """Decide direction, then push / pull / noop / conflict-handle accordingly.
 
-        Phase 17: consults `SyncDirectionResolver` using the local
+        Consults `SyncDirectionResolver` using the local
         + peer `VersionVector` and the two manifests. On CONFLICT,
-        falls back to `LastWriterWinsStrategy` (Phase 7) — choosing
+        falls back to `LastWriterWinsStrategy` — choosing
         "remote wins" pulls the peer's version; choosing "local
         wins" no-ops. `merge_strategy` lets a caller inject a
         different policy; default is `LastWriterWinsStrategy()`.
@@ -378,9 +377,9 @@ class SyncFileUseCase:
         """Best-effort 'own device id' for the conflict metadata.
 
         Falls back to a sentinel string when not threaded through
-        the use case explicitly (Phase 17 keeps the use case
-        peer-agnostic; main.py will override via a richer wiring in
-        Phase 18+). The conflict ID is informational only.
+        the use case explicitly (the use case stays peer-agnostic;
+        richer wiring can override it from outside). The conflict ID
+        is informational only.
         """
         return peer.address.ip_address or "local"
 
@@ -433,8 +432,8 @@ class LocalVersionProvider(Protocol):
     rejected any ordinary async function passed for this parameter
     (only an actual `LocalVersionProvider` instance satisfied it) even
     though the runtime behavior — "any async callable with this
-    signature" — always worked correctly; `main.py`'s Phase 21 wiring
-    of a plain local function is what surfaced this.
+    signature" — always worked correctly; `main.py` passing a plain
+    local function is what surfaced this.
     """
 
     async def __call__(self, relative_path: str) -> VersionVector | None: ...

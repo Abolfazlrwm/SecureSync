@@ -10,8 +10,8 @@ from securesync.domain.networking import Peer, PeerRepository
 class InMemoryPeerRepository(PeerRepository):
     """A thread-safe in-memory store for peers.
 
-    Useful for testing and as a temporary store before the SQLite
-    adapter is implemented in Phase 8.
+    Useful for testing and as a lightweight runtime peer cache;
+    durable peer metadata is out of scope for this adapter.
     """
 
     def __init__(self) -> None:

@@ -97,7 +97,7 @@ class SyncOrchestrator:
             sync_file_use_case: Pushes locally known files to a newly
                 discovered peer (see ``docs/adr/0023-automatic-push-on-peer-discovery.md``).
                 Without one, peer discovery still happens but nothing
-                is synced automatically — the pre-Phase-16 behavior.
+                is synced automatically.
             sync_root: This device's local sync directory, required
                 when `sync_file_use_case` is set.
             chunking_strategy: Decides chunk boundaries for files being
@@ -147,12 +147,8 @@ class SyncOrchestrator:
         """The configured `DownloadChunksUseCase`, or `None` if none was wired.
 
         Exposed for the same reason as `metadata_repo` — see there.
-        Currently the only consumer is the Phase 20 end-to-end test,
-        which uses it to drain a peer's pushed chunk out of this
-        device's transport inbox: nothing in `SyncOrchestrator` itself
-        does this automatically yet for an unsolicited inbound push
-        (see docs/adr/0025-end-to-end-sync-verification.md's
-        "known gap" section).
+        Unsolicited inbound pushes are drained by
+        `ReceivePushedFilesUseCase` in `main.py` instead.
         """
         return self._download_use_case
 

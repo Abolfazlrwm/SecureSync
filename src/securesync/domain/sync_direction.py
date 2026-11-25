@@ -9,17 +9,15 @@ for a single file and returns one of four outcomes:
   pull their chunks down.
 - ``CONFLICT`` — the versions are concurrent (neither is an ancestor
   of the other); callers should run a merge strategy (currently
-  Phase 7's Last Writer Wins via `LastWriterWinsStrategy`).
+  Last Writer Wins via `LastWriterWinsStrategy`).
 - ``NOOP`` — neither side has anything newer than the other (vectors
   are equal, or both empty); no transfer is needed.
 
-A ``None`` remote version (a peer that doesn't record versions, e.g.
-a legacy setup or one that pre-dates Phase 7) falls back to the
-content-hash comparison that Phase 15/16 already did: if the local
+A ``None`` remote version (a peer that doesn't record versions)
+falls back to a plain content-hash comparison: if the local
 manifest has any chunk the peer's manifest doesn't, PUSH; if the
 peer's has any the local doesn't, PULL; else NOOP. CONFLICT can't
-be detected without a version, so this fallback never returns it —
-matching the pre-Phase-17 behavior that ADR-0023 deferred.
+be detected without a version, so this fallback never returns it.
 
 This is a stateless domain service — the comparison is pure on its
 two inputs. See ``docs/adr/0024-version-aware-sync-direction.md``.
@@ -76,7 +74,7 @@ class SyncDirectionResolver:
             local_collection: The locally-known chunk manifest, or
                 ``None`` if this file doesn't exist locally.
             local_version: The local file's causal version vector,
-                or ``None`` if unknown (e.g. before Phase 7 metadata).
+                or ``None`` if not recorded.
             remote_collection: The peer's chunk manifest, or ``None``
                 if the peer doesn't have this file.
             remote_version: The peer's reported version vector, or
@@ -147,10 +145,10 @@ class SyncDirectionResolver:
         local_collection: ChunkCollection | None,
         remote_collection: ChunkCollection | None,
     ) -> SyncDirectionDecision:
-        # No version info: use the content-hash-only diff from
-        # Phase 15/16. CONFLICT can't be detected without a vector,
-        # so a content mismatch just defaults to PUSH (matching the
-        # pre-Phase-17 auto-push behavior on newly-discovered peers).
+        # No version info: use the content-hash-only diff. CONFLICT
+        # can't be detected without a vector, so a content mismatch
+        # defaults to PUSH (the same behavior plain auto-push on
+        # newly-discovered peers always had).
         decision = self._diff_content_hashes(local_collection, remote_collection)
         if decision.direction is SyncDirection.CONFLICT:
             return SyncDirectionDecision(

@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [
-    { name = "SecureSync Contributors" }
+    { name = "Abolfazl Ranjbaran", email = "ranjbaran.ar85@gmail.com" }
 ]
 keywords = [
     "file-sync",
@@ -20,7 +20,7 @@ keywords = [
     "end-to-end-encryption",
 ]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.12",
@@ -29,9 +29,7 @@ classifiers = [
     "Topic :: Security :: Cryptography",
 ]
 
-# --- Runtime dependencies -----------------------------------------------
-# Each dependency is chosen deliberately; see docs/architecture.md
-# "Technology Decisions" for the rationale behind every entry.
+# Rationale for every entry: docs/architecture.md "Technology Decisions".
 dependencies = [
     "watchdog>=4.0",        # Cross-platform filesystem event monitoring
     "cryptography>=42.0",   # X25519, AES-256-GCM, ChaCha20-Poly1305 (audited, industry standard)
@@ -40,9 +38,9 @@ dependencies = [
     "typer>=0.12",          # CLI framework (built on Click, type-hint driven)
     "rich>=13.7",           # Terminal rendering for the live dashboard
     "pyyaml>=6.0",          # YAML configuration files
-    "structlog>=24.1",      # Structured logging (introduced when logging lands)
-    "aiosqlite>=0.20",      # Async SQLite for metadata persistence (Phase 8)
-    "zeroconf>=0.131",      # mDNS peer discovery on local networks (Phase 4)
+    "structlog>=24.1",      # Structured logging
+    "aiosqlite>=0.20",      # Async SQLite for metadata persistence
+    "zeroconf>=0.131",      # mDNS peer discovery on local networks
 ]
 
 [project.optional-dependencies]
@@ -50,30 +48,21 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-cov>=5.0",
-    "hypothesis>=6.100",     # Property-based tests for the chunk engine (Phase 2)
+    "hypothesis>=6.100",     # Property-based tests for the chunk engine
     "mypy>=1.10",
-    "types-PyYAML>=6.0",     # Was missing throughout Phases 0-21 -- CI's
-                             # `mypy src` (strict, no tolerance) failed on
-                             # this every single run; local checks treated
-                             # it as a harmless "pre-existing" notice, but
-                             # CI has zero tolerance for any mypy error.
+    "types-PyYAML>=6.0",     # mypy --strict fails without it
     "ruff>=0.5",
     "black>=24.4",
     "pre-commit>=3.7",
 ]
 
 [project.scripts]
-# Target module doesn't exist yet — added in Phase 9 (CLI Dashboard).
-# `pip install -e .` succeeds now; running `securesync` will fail with
-# ModuleNotFoundError until Phase 9 lands, by design.
 securesync = "securesync.presentation.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/securesync"]
 
 # --- Tooling configuration ------------------------------------------------
-# Configuration only (no application logic) - safe to define in Phase 0
-# so every later phase is checked against the same bar from day one.
 
 [tool.ruff]
 line-length = 100
@@ -94,24 +83,16 @@ disallow_untyped_defs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# `src` makes the tests import the *checked-out* package rather than whatever
-# copy `pip install` put in site-packages. Without it, a non-editable install
-# shadows the repo source and coverage measures files that never execute —
-# which is exactly why CI used to report "TOTAL ... 0%".
+# "src" keeps the tests importing the checked-out package instead of a
+# site-packages copy, and "--cov=." (not "--cov=src/securesync") keeps
+# coverage.xml paths repo-relative so Codecov can map them.
 pythonpath = ["src", "."]
 asyncio_mode = "auto"
-# --cov and --cov-report=term-missing apply to every `pytest` invocation.
-# `--cov=.` (not `--cov=src/securesync`) so the XML keeps repo-relative paths;
-# the `omit` list under [tool.coverage.run] keeps the measured set to the
-# package. Makefile/CI only ever *add* an extra --cov-report (html, xml) on
-# top of this — never repeat --cov or term-missing elsewhere.
 addopts = "--cov=. --cov-report=term-missing"
 
 [tool.coverage.run]
-# Measure from the repository root so coverage.xml lists repo-relative paths
-# (`src/securesync/main.py`). With `--cov=src/securesync` the package
-# directory becomes the report root and the XML lists `main.py`, which
-# Codecov cannot map back to this repository.
+# Root-relative so coverage.xml lists src/securesync/... paths Codecov
+# can map back to this repository.
 source = ["."]
 omit = [
     "tests/*",

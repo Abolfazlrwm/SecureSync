@@ -10,8 +10,8 @@ delivery. Reuses the already-negotiated
 keys from the same handshake `TcpTransferTransport` uses — no separate
 key exchange for this port.
 
-Phase 17: the response now includes the file's `VersionVector`
-alongside its `ChunkCollection`, so the caller can decide
+The response includes the file's `VersionVector` alongside its
+`ChunkCollection`, so the caller can decide
 push/pull/conflict/noop without re-querying. The version comes from a
 `MetadataRepository` (SQLite-backed in production); if none is
 configured the returned version is `None` and the caller falls back

@@ -1,5 +1,5 @@
 """SecureSync — presentation package.
 
-No implementation yet — scaffolding created in Phase 0. See
-docs/architecture.md for what belongs in this layer.
+User-facing surfaces. ``cli.py`` is the Typer application behind the
+``securesync`` console script.
 """

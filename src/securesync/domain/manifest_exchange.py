@@ -11,8 +11,8 @@ is where a real pull lives: `request_manifest` asks what a peer has
 for a file; `request_chunks` asks for specific chunks' actual bytes.
 See ``docs/adr/0022-file-synchronization-use-case.md``.
 
-Phase 17: `request_manifest` now returns a `ManifestWithVersion` —
-the chunk collection paired with the `VersionVector` the peer
+`request_manifest` returns a `ManifestWithVersion` — the chunk
+collection paired with the `VersionVector` the peer
 recorded for that file's causal history — so callers can decide
 which direction to sync (push, pull, conflict, noop) without
 re-fetching metadata from a second port. See
@@ -38,8 +38,8 @@ class ManifestWithVersion:
         collection: The ChunkCollection the peer holds for this file.
         version: The VersionVector the peer recorded for this file's
             causal history. ``None`` means the peer has the file but
-            no recorded version (a peer that doesn't use SyncOrchestrator
-            or that pre-dates Phase 7).
+            no recorded version (e.g. a peer that doesn't track
+            version vectors).
     """
 
     collection: ChunkCollection

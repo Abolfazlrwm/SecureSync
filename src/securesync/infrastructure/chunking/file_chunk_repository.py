@@ -1,10 +1,9 @@
 """Temporary filesystem-backed implementation of the ``ChunkRepository`` port.
 
-A placeholder until the SQLite-backed metadata store planned for
-Phase 8 lands (see ``ROADMAP.md``) — the port stays the same either
-way, so callers never need to change when that adapter is swapped in.
-Each file's manifest is stored as one JSON document, keyed by a hash of
-its resolved source path.
+The SQLite-backed metadata store can replace this behind the same
+port, so callers never need to change when that adapter is swapped
+in. Each file's manifest is stored as one JSON document, keyed by a
+hash of its resolved source path.
 """
 
 from __future__ import annotations

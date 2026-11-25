@@ -11,13 +11,13 @@ wanted) in a test environment, and it already has its own dedicated
 test. In its place, this test calls `handle_peer_discovered` directly
 via `bootstrap`'s `on_ready` hook — everything downstream of "a peer
 was discovered" (session handshake, manifest exchange, delta
-computation, chunk transfer, and — as of Phase 21 — autonomous file
-reconstruction) is the real production code path.
+computation, chunk transfer, and autonomous file reconstruction) is
+the real production code path.
 
 ## History
 
-Phase 20 first wrote this test and it immediately found three real
-bugs (see ADR-0025): `main.py` never wired `SyncFileUseCase` into
+This test was first written for the end-to-end verification pass and
+it immediately found three real bugs (see ADR-0025): `main.py` never wired `SyncFileUseCase` into
 `SyncOrchestrator` at all, `TcpTransferTransport` looked up sessions
 under the wrong device_id, and `send_chunk` connected to the wrong
 port. Even after fixing all three, this test still needed a manual
@@ -25,8 +25,8 @@ workaround on B's side (calling `DownloadChunksUseCase.execute`
 directly) because nothing autonomously drained a pushed chunk and
 reconstructed the file — `push` had no receiver, unlike `pull`.
 
-Phase 21 built that receiver (`ReceivePushedFilesUseCase`, wired into
-`bootstrap` as a background task — see ADR-0026) and this test was
+The push receiver (ADR-0026, `ReceivePushedFilesUseCase`, wired into
+`bootstrap` as a background task) closed that gap and this test was
 rewritten to remove the workaround entirely: it now just writes a file
 on A and polls for it to appear on B, the same way a person actually
 using SecureSync would experience it.
@@ -157,7 +157,7 @@ class TestEndToEndSync:
             try:
                 # Write a real file into A's sync directory, and record
                 # it in A's real metadata store -- standing in for the
-                # live filesystem watcher (Phase 1), which isn't wired
+                # live filesystem watcher, which isn't wired
                 # into main.py yet; that's a separate, already-tested
                 # component (tests/integration/test_monitor_directories_integration.py).
                 content = b"hello from device A, synced end to end\n"
@@ -186,7 +186,7 @@ class TestEndToEndSync:
                 assert device_a.orchestrator is not None
                 await device_a.orchestrator.handle_peer_discovered(peer_b)
 
-                # No manual intervention on B's side needed as of Phase
+                # No manual intervention on B's side needed.
                 # 21: `ReceivePushedFilesUseCase` (running as a
                 # background task inside B's own bootstrap()) drains
                 # the pushed chunk and reconstructs the file itself.

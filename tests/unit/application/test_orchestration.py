@@ -288,7 +288,7 @@ async def test_handle_peer_discovered_survives_one_failed_push() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_peer_discovered_does_nothing_without_sync_file_use_case() -> None:
-    """The pre-Phase-16 default (no sync_file_use_case) must not raise or push."""
+    """The do-nothing default (no sync_file_use_case) must not raise or push."""
     orchestrator = _orchestrator()
 
     await orchestrator.start()

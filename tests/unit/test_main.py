@@ -14,9 +14,9 @@ signal would (see `_run_and_stop`'s docstring for why a real OS signal
 isn't used here), and awaits it with a timeout so a wiring regression
 fails the test instead of hanging the suite.
 
-Lines deliberately left uncovered (see the Phase 19 report — not
-fixed here): the `if __name__ == "__main__":` block at the bottom of
-main.py can't be exercised via `pytest` without spawning a subprocess,
+Lines deliberately left uncovered (accepted, not an oversight): the
+`if __name__ == "__main__":` block at the bottom of main.py can't be
+exercised via `pytest` without spawning a subprocess,
 and doing so for two lines that are a thin wrapper around the
 already-tested `bootstrap()` call isn't worth the added flakiness.
 """

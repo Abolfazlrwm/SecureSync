@@ -38,8 +38,8 @@ class FixedSizeChunkingStrategy(ChunkingStrategy):
     """Splits a stream into equal-sized chunks; the final one may be shorter.
 
     The only :class:`~securesync.domain.chunking.ChunkingStrategy`
-    implementation shipped in Phase 2. A future content-defined
-    strategy implements the same port without requiring any change
+    implementation so far. A future content-defined strategy
+    implements the same port without requiring any change
     here, in :class:`StreamingChunkReader`, or in any application/
     domain code — see ADR-0007.
     """

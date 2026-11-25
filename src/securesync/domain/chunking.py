@@ -34,8 +34,8 @@ class ChunkingStrategy(ABC):
     all of which must inspect actual byte content to choose a cut point
     — be added as a new adapter with zero change to ``ChunkReader`` or
     to any application/domain code that depends on this port. Only
-    ``FixedSizeChunkingStrategy`` (infrastructure) is implemented in
-    Phase 2; see ADR-0007.
+    ``FixedSizeChunkingStrategy`` (infrastructure) is implemented;
+    see ADR-0007.
     """
 
     @abstractmethod
@@ -159,12 +159,10 @@ class ChunkWriter(ABC):
 class ChunkRepository(ABC):
     """Port for storing and retrieving a file's chunk manifest.
 
-    A temporary, filesystem-backed implementation
-    (``FileChunkRepository``, infrastructure) is provided in Phase 2;
-    the metadata database planned for Phase 8 (see ``ROADMAP.md``) is
-    expected to become the primary implementation later, behind this
-    same port — callers never need to change when that adapter is
-    swapped in.
+    A filesystem-backed implementation (``FileChunkRepository``,
+    infrastructure) ships today; the SQLite metadata store can become
+    the primary implementation later behind this same port — callers
+    never need to change when that adapter is swapped in.
     """
 
     @abstractmethod

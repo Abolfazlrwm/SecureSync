@@ -104,11 +104,8 @@ async def bootstrap(
         on_ready: Optional hook called with the fully-wired
             `SyncOrchestrator` right after construction, before
             `start()`/`wait_until_stopped()` block this coroutine.
-            Not used in normal operation (`__main__` never passes
-            one) — it exists so tests can obtain a handle to a real,
-            fully-wired orchestrator (e.g. to call
-            `handle_peer_discovered` directly) without needing a real
-            mDNS network to trigger discovery. Must not block.
+            Exists so tests can grab a fully-wired orchestrator
+            without needing a real mDNS network. Must not block.
     """
     logger.info("application_bootstrap_started", config_path=config_path)
 
@@ -201,13 +198,10 @@ async def bootstrap(
     )
     await manifest_exchange.start()
 
-    # The Phase 15-17 file-sync pipeline (manifest exchange + delta +
-    # transfer + version-aware direction) was built and tested in
-    # isolation but was never actually wired in here, which meant
-    # SyncOrchestrator's auto-push-on-discovery (ADR-0023/0024) was a
-    # silent no-op in every real run: `_auto_push_known_files` returns
-    # immediately whenever `sync_file_use_case` is `None`. This wiring
-    # is what makes peer discovery actually result in files moving.
+    # The file-sync pipeline (manifest exchange + delta + transfer +
+    # version-aware direction). Without it, auto-push-on-discovery
+    # (ADR-0023/0024) is a silent no-op: `_auto_push_known_files`
+    # returns immediately whenever `sync_file_use_case` is `None`.
     async def _local_version(relative_path: str) -> VersionVector | None:
         """Look up this device's own recorded version for a file.
 

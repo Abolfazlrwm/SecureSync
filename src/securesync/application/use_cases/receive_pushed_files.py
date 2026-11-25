@@ -1,6 +1,6 @@
 """Use case: autonomously receive and reconstruct files pushed by peers.
 
-ADR-0025 (Phase 20) disclosed a real gap: `SyncFileUseCase.push` sends
+ADR-0025 disclosed a real gap: `SyncFileUseCase.push` sends
 chunks over `TransferTransport.send_chunk`, but nothing on the
 receiving side ever turned arriving chunks into a reconstructed file
 -- `pull` doesn't have this problem because it uses

@@ -20,7 +20,7 @@ from pathlib import Path
 class ChunkAlgorithm(StrEnum):
     """The digest algorithm used to hash a chunk's content.
 
-    Only :attr:`SHA256` is implemented in Phase 2. The enum exists so a
+    Only :attr:`SHA256` is implemented today. The enum exists so a
     future algorithm (e.g. BLAKE3) can be added as a new member,
     without changing the shape of :class:`ChunkHash` or any code that
     depends on it (Open/Closed).

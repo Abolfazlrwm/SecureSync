@@ -59,32 +59,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
       - name: Run tests
-        # GitHub's Windows runners default `run:` steps to PowerShell,
-        # not bash -- this script's `if [ "$code" -eq 5 ]` syntax is
-        # bash-only and silently failed with a ParserError on every
-        # windows-latest run until this was added (never caught before
-        # because this workflow had never actually been run on a real
-        # GitHub-hosted Windows runner).
+        # bash instead of the runner default (PowerShell on Windows).
         shell: bash
-        run: |
-          set +e
-          pytest --cov-report=xml
-          code=$?
-          # Exit code 5 = "no tests collected". Expected before Phase 1
-          # lands any tests; treat as a pass so scaffolding-only PRs stay
-          # green. Any other non-zero code is a real failure.
-          if [ "$code" -eq 5 ]; then
-            echo "::notice::No tests collected yet (expected pre-Phase 1) — not a failure."
-            exit 0
-          fi
-          exit $code
-      # Guard against the report silently measuring nothing. This job used to
-      # print "TOTAL 1917 1917 0%" and upload a 0% coverage.xml to Codecov,
-      # because `pip install .` (non-editable) put a second copy of the
-      # package in site-packages that the tests actually imported, while
-      # coverage measured src/securesync. That is fixed by the editable
-      # install above plus `pythonpath = ["src", "."]`, and this step makes
-      # any regression fail loudly instead of shipping a green 0%.
+        run: pytest --cov-report=xml
+      # A coverage.xml that measures nothing (all 0%) has happened here
+      # before: a non-editable install shadows the checked-out source.
+      # Fail loudly instead of uploading a meaningless report.
       - name: Assert coverage was actually measured
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         run: |
@@ -116,14 +96,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
-      # No exit-code-5 escape hatch here, deliberately.
-      #
-      # pytest exits 5 when it collects no tests. This job previously
-      # translated that into success, so it reported a green "Security
-      # test suite" while tests/security/ was completely empty -- the
-      # job proved nothing at all, and the green checkmark actively
-      # suggested otherwise. For this job an empty suite is a failure,
-      # not a pass: it exists solely to prove the attacks in
-      # tests/security are actually exercised.
+      # No "no tests collected" escape hatch here: an empty security
+      # suite must fail, not pass.
       - name: Run security test suite
         run: pytest tests/security -v

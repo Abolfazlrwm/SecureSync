@@ -1,5 +1,5 @@
 """SecureSync — core package.
 
-No implementation yet — scaffolding created in Phase 0. See
-docs/architecture.md for what belongs in this layer.
+Wire-protocol primitives shared by the transports: packet framing,
+encoding, and integrity checks (``protocol.py``).
 """

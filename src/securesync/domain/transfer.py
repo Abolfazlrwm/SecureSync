@@ -31,11 +31,11 @@ class TransferProgress:
 class IncomingPush:
     """One chunk of an unsolicited push, with enough context to reconstruct it.
 
-    Phase 20's end-to-end test (ADR-0025) found that a pushed chunk's
-    wire payload carried no file identity at all — a receiver had no
-    way to know which file an arriving chunk belonged to, or when a
-    file's chunks were all in. `relative_path` and `total_chunks` (added
-    in Phase 21, see ADR-0026) close that gap; `chunk` already knows
+    The end-to-end verification campaign (ADR-0025) found that a
+    pushed chunk's wire payload carried no file identity at all — a
+    receiver had no way to know which file an arriving chunk belonged
+    to, or when a file's chunks were all in. `relative_path` and
+    `total_chunks` (see ADR-0026) close that gap; `chunk` already knows
     its own offset within the file via `chunk.metadata.offset`.
 
     Attributes:

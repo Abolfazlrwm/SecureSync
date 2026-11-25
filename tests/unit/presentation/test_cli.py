@@ -7,6 +7,7 @@ here reads or writes anything under the real home directory.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from pathlib import Path
 
@@ -214,7 +215,13 @@ class TestDaemonCommand:
         result = runner.invoke(app, ["daemon", "--config", "config.yaml"])
 
         assert result.exit_code == 1
-        assert "Error: boom" in result.stderr
+        # typer.echo(err=True) writes to stderr. click >= 8.2 keeps it in
+        # result.stderr; older versions mix it into result.output instead,
+        # so check both to stay independent of the installed click version.
+        combined = result.output
+        with contextlib.suppress(ValueError):
+            combined += result.stderr
+        assert "Error: boom" in combined
 
     def test_daemon_handles_keyboard_interrupt_cleanly(
         self, monkeypatch: pytest.MonkeyPatch

@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [
-    { name = "Abolfazl Ranjbaran", email = "ranjbaran.ar85@gmail.com" }
+    { name = "Abolfazl Ranjbaran", email = "206173650+Abolfazlrwm@users.noreply.github.com" }
 ]
 keywords = [
     "file-sync",

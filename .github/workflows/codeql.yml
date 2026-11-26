@@ -1,0 +1,35 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Monday 05:17 UTC — outside the dependabot window, early enough
+    # that new findings are visible for the whole working week.
+    - cron: "17 5 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (python)
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: python
+          # Pure Python: no build step is needed to model the code.
+          build-mode: none
+      # Async-heavy protocol code: taint flows through asyncio tasks,
+      # which is exactly the pattern CodeQL's Python extractor handles.
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:python"

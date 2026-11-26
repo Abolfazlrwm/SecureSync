@@ -100,3 +100,18 @@ jobs:
       # suite must fail, not pass.
       - name: Run security test suite
         run: pytest tests/security -v
+
+  dependency-audit:
+    name: Dependency audit (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]" pip-audit
+      # Audits the resolved environment, so the dev extras are covered
+      # too — contributors run the same set of packages CI does.
+      # --strict also fails on audit errors instead of skipping them.
+      - name: Audit installed dependencies
+        run: pip-audit --strict

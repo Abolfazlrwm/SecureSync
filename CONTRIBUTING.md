@@ -70,6 +70,29 @@ test(transfer): add resume-after-disconnect integration test
 
 Types: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `chore`, `ci`.
 
+## Releases
+
+Releases are cut by tagging — a `v*` tag push triggers the release
+workflow and the rest is automated:
+
+1. Bump `version` in `pyproject.toml` and add the matching
+   [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) section to
+   `CHANGELOG.md`.
+2. Commit as `chore(release): <version>`, create the annotated tag
+   (`git tag -a v<version> -m "..."`), and push both:
+   `git push origin main v<version>`.
+3. The workflow verifies that the tag matches `pyproject.toml`, builds
+   the sdist and wheel, smoke-tests the wheel in a clean venv, writes
+   `SHA256SUMS.txt`, and attaches everything to the GitHub release.
+   The same push publishes `ghcr.io/abolfazlrwm/securesync` tagged
+   with the version and `latest`.
+
+Release artifacts are verified by name:
+
+```bash
+sha256sum -c SHA256SUMS.txt
+```
+
 ## Architecture Decision Records
 
 Any change to the architecture, a technology choice, or a security-relevant

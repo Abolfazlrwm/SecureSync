@@ -74,6 +74,25 @@ flowchart LR
 
 Requires Python 3.12 or newer.
 
+### From a release
+
+Each [release](https://github.com/Abolfazlrwm/SecureSync/releases)
+carries a wheel, an sdist, and a `SHA256SUMS.txt` checksum file:
+
+```bash
+# verify the download, then install
+sha256sum -c SHA256SUMS.txt
+pip install securesync-<version>-py3-none-any.whl
+```
+
+There is also a container image on GHCR:
+
+```bash
+docker pull ghcr.io/abolfazlrwm/securesync:latest
+```
+
+### From source
+
 ```bash
 git clone https://github.com/Abolfazlrwm/SecureSync.git
 cd SecureSync

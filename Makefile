@@ -1,5 +1,5 @@
 .PHONY: help install lint format format-check typecheck test test-cov \
-        benchmark clean docker-build docker-up docs pre-commit
+        benchmark build audit clean docker-build docker-up docs pre-commit
 
 help:
         @echo "SecureSync — developer commands"
@@ -11,6 +11,8 @@ help:
         @echo "  make test          Run pytest"
         @echo "  make test-cov      Run pytest with coverage report"
         @echo "  make benchmark     Run the benchmark suite (benchmarks/)"
+        @echo "  make build         Build the sdist and wheel into dist/"
+        @echo "  make audit         Audit installed dependencies (pip-audit)"
         @echo "  make pre-commit    Run all pre-commit hooks against all files"
         @echo "  make docker-build  Build the SecureSync Docker image"
         @echo "  make docker-up     Start SecureSync via docker-compose"
@@ -40,6 +42,12 @@ test-cov:
 
 benchmark:
         python -m benchmarks
+
+build:
+        python -m build
+
+audit:
+        pip-audit --strict
 
 pre-commit:
         pre-commit run --all-files

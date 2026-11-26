@@ -3,6 +3,46 @@
 All notable changes to this project are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.7.0] - 2026-11-26
+
+### Added
+
+- Release pipeline (`release.yml`): a `v*` tag push now builds the
+  sdist and wheel, smoke-tests the wheel in a clean venv (import, CLI
+  entry point, py.typed marker), writes `SHA256SUMS.txt` next to the
+  artifacts, and attaches everything to the GitHub release. The same
+  push publishes `ghcr.io/abolfazlrwm/securesync` tagged with the
+  version and `latest`. The workflow verifies the tag matches the
+  version in `pyproject.toml` before building anything — v1.6.0 once
+  shipped with the two out of sync.
+- Dependency audit: `pip-audit --strict` runs as a CI job on every
+  build, over the resolved environment (dev extras included, the local
+  distribution filtered out since pip-audit cannot look up a
+  not-on-PyPI package). `make audit` runs the same check locally.
+- CodeQL analysis on push, PR and a weekly schedule — static analysis
+  of the Python source itself (taint flows, injection paths, insecure
+  patterns), complementing the dependency audit.
+- `py.typed` (PEP 561): the codebase is `mypy --strict`-clean, and the
+  wheel now ships the marker so downstream projects importing
+  `securesync` get the annotations instead of `Any`.
+
+### Fixed
+
+- `Makefile`: recipes were indented with spaces, so every `make`
+  invocation — including `make help` — died with "missing separator"
+  before running anything. Recipes use tabs now, and `make build` /
+  `make audit` were added alongside.
+- Package metadata no longer carries the personal email address; the
+  GitHub noreply address is used instead, matching what the privacy
+  settings already force on commits.
+
+### Changed
+
+- `README.md`: installation now starts from the release artifacts —
+  wheel with checksum verification and the GHCR image — instead of
+  clone-only instructions. `CONTRIBUTING.md` documents the release
+  process (bump, changelog, tag, push) and what the workflow does.
+
 ## [1.6.1] - 2026-11-25
 
 ### Fixed

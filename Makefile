@@ -47,7 +47,8 @@ build:
 	python -m build
 
 audit:
-	pip-audit --strict
+	pip freeze | grep -v "^-e" | grep -v "^securesync" > /tmp/securesync-audit.txt
+	pip-audit --strict --no-deps -r /tmp/securesync-audit.txt
 
 pre-commit:
 	pre-commit run --all-files

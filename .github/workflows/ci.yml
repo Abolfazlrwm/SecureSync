@@ -110,8 +110,12 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]" pip-audit
-      # Audits the resolved environment, so the dev extras are covered
-      # too — contributors run the same set of packages CI does.
-      # --strict also fails on audit errors instead of skipping them.
+      # Audit the resolved environment — the same package set
+      # contributors run. The project itself is filtered out: pip-audit
+      # cannot look up a local, not-on-PyPI distribution (even with
+      # --skip-editable), and --no-deps keeps the audit on exactly what
+      # is installed instead of a freshly re-resolved set.
       - name: Audit installed dependencies
-        run: pip-audit --strict
+        run: |
+          pip freeze | grep -v "^-e" | grep -v "^securesync" > frozen.txt
+          pip-audit --strict --no-deps -r frozen.txt

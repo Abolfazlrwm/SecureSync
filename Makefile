@@ -1,63 +1,63 @@
 .PHONY: help install lint format format-check typecheck test test-cov \
-        benchmark build audit clean docker-build docker-up docs pre-commit
+	benchmark build audit clean docker-build docker-up docs pre-commit
 
 help:
-        @echo "SecureSync — developer commands"
-        @echo "  make install       Install package + dev dependencies"
-        @echo "  make lint          Run ruff"
-        @echo "  make format        Run black (rewrites files)"
-        @echo "  make format-check  Run black --check (CI mode)"
-        @echo "  make typecheck     Run mypy --strict"
-        @echo "  make test          Run pytest"
-        @echo "  make test-cov      Run pytest with coverage report"
-        @echo "  make benchmark     Run the benchmark suite (benchmarks/)"
-        @echo "  make build         Build the sdist and wheel into dist/"
-        @echo "  make audit         Audit installed dependencies (pip-audit)"
-        @echo "  make pre-commit    Run all pre-commit hooks against all files"
-        @echo "  make docker-build  Build the SecureSync Docker image"
-        @echo "  make docker-up     Start SecureSync via docker-compose"
-        @echo "  make clean         Remove caches, build artifacts"
+	@echo "SecureSync — developer commands"
+	@echo "  make install       Install package + dev dependencies"
+	@echo "  make lint          Run ruff"
+	@echo "  make format        Run black (rewrites files)"
+	@echo "  make format-check  Run black --check (CI mode)"
+	@echo "  make typecheck     Run mypy --strict"
+	@echo "  make test          Run pytest"
+	@echo "  make test-cov      Run pytest with coverage report"
+	@echo "  make benchmark     Run the benchmark suite (benchmarks/)"
+	@echo "  make build         Build the sdist and wheel into dist/"
+	@echo "  make audit         Audit installed dependencies (pip-audit)"
+	@echo "  make pre-commit    Run all pre-commit hooks against all files"
+	@echo "  make docker-build  Build the SecureSync Docker image"
+	@echo "  make docker-up     Start SecureSync via docker-compose"
+	@echo "  make clean         Remove caches, build artifacts"
 
 install:
-        pip install -e ".[dev]"
-        pre-commit install
+	pip install -e ".[dev]"
+	pre-commit install
 
 lint:
-        ruff check src tests
+	ruff check src tests
 
 format:
-        black src tests
+	black src tests
 
 format-check:
-        black --check src tests
+	black --check src tests
 
 typecheck:
-        mypy src
+	mypy src
 
 test:
-        pytest
+	pytest
 
 test-cov:
-        pytest --cov-report=html
+	pytest --cov-report=html
 
 benchmark:
-        python -m benchmarks
+	python -m benchmarks
 
 build:
-        python -m build
+	python -m build
 
 audit:
-        pip-audit --strict
+	pip-audit --strict
 
 pre-commit:
-        pre-commit run --all-files
+	pre-commit run --all-files
 
 docker-build:
-        docker build -t securesync:dev .
+	docker build -t securesync:dev .
 
 docker-up:
-        docker compose up --build
+	docker compose up --build
 
 clean:
-        find . -type d -name "__pycache__" -exec rm -rf {} +
-        rm -rf .pytest_cache .mypy_cache .ruff_cache htmlcov .coverage dist build *.egg-info
+	find . -type d -name "__pycache__" -exec rm -rf {} +
+	rm -rf .pytest_cache .mypy_cache .ruff_cache htmlcov .coverage dist build *.egg-info
